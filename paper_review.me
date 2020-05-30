@@ -6,8 +6,18 @@
   need to analyse H.264/AVC codec source code
   
 2. Low-Complexity No-Reference PSNR Estimation for H.264/AVC Encoded Video(2013)
+  
+  the average bitrate of the video stream
+  the mean QP of the I-frames of this video
+  
+  PSNR = b 1 +b 2 ·log(rate)+b 3 ·QP I +b 4 ·rate·QP I
+   
+  Used Bitstream information.  
+  Point: The ITU has standardized NR methods that rely on the bitstream as well as on the packet headers of video streams to assess the quality.
 
+3. Predicting Full-Reference Video Quality Measures(2015)
 
+ High Efficiency Video Coding (HEVC)
 
 reference bitstream GH URL
 
