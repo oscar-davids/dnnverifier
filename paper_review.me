@@ -22,7 +22,7 @@
  
 4. Evaluation of No Reference Bitstream-based Video Quality Assessment Methods(2017)
 
- There is Nothing important Bitstream!!
+ There is Nothing important but Bitstream!!
  
  
 Need to anlayse x264 raw-bitstream every renditions stream, and use as input stream of simple ANN
@@ -50,4 +50,18 @@ https://www.cosmosoftware.io/blog/webrtc-video-quality-assessment
 NeedTool & utility
 
 VideoEye, Mpeg TS package analysis(MPEG-2_TS_Packet_Analyzer)
+
+Workflow summary
+
+- TS file generation, consist of H264 bitstream(with H264, Cuda codec encode)
+- Bitstream analyze 
+  Basic profile 
+  Maroblock
+  Quantization parameter
+  Motion vector
+- Traning over Dataset with sample attack
+- Accuracy Estimatation
+- Analyze bitstream attack vulnerability 
+
+
 
