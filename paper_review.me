@@ -59,11 +59,24 @@ Workflow summary
   
   ffmpeg -i infile.mp4 -an -vcodec libx264 -crf 23 out.h264
   
+- H264 Bitstream parsing and reconstruction
+  
+  Native Parsing and reconstruction(only use h264 library)  
+  Recovery frame with FFmpeg
+  
+  Which is more effective for us? (speed , claculation cost ...)
+  Need to some test and coding.  
+  
 - Bitstream analyze 
   Basic profile 
-  Maroblock
+  Macroblock
   Quantization parameter
   Motion vector
+  
+- Train model selection
+  
+  For satisfying speed going to use Three-layer (ANN)Artificial Neural Network.
+
 - Traning over Dataset with sample attack
 - Accuracy Estimatation
 - Analyze bitstream attack vulnerability 
