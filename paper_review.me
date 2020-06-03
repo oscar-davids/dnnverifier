@@ -54,6 +54,9 @@ VideoEye, Mpeg TS package analysis(MPEG-2_TS_Packet_Analyzer)
 Workflow summary
 
 - TS file generation, consist of H264 bitstream(with H264, Cuda codec encode)
+  
+  ffmpeg -i INPUT.mp4 -codec copy -bsf:v h264_mp4toannexb OUTPUT.ts
+  
 - Bitstream analyze 
   Basic profile 
   Maroblock
