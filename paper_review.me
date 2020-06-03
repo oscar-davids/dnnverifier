@@ -55,7 +55,9 @@ Workflow summary
 
 - TS file generation, consist of H264 bitstream(with H264, Cuda codec encode)
   
-  ffmpeg -i INPUT.mp4 -codec copy -bsf:v h264_mp4toannexb OUTPUT.ts
+  ffmpeg -i infile.mp4 -codec copy -bsf:v h264_mp4toannexb out.ts
+  
+  ffmpeg -i infile.mp4 -an -vcodec libx264 -crf 23 out.h264
   
 - Bitstream analyze 
   Basic profile 
