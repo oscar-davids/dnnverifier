@@ -580,7 +580,7 @@ boolean check_all_zeroes (int** coefficients) {
 
 /*** NO Reference psnr Estimation ***/
 int no_psnr_calculation (resultsList** results_list, int** coefficients, int qp, char* predmodestring, int typeval) {
-    uint i = 0, j = 0, totCntr = 0, zeroCntr = 0, oneCntr = 0;
+    int i = 0, j = 0, totCntr = 0, zeroCntr = 0, oneCntr = 0;
     int qk = 0, zeroCounter = 0, oneCounter = 0;
 
     double numIntegralFirstBeta = 0.0, numIntegralSecondBeta = 0.0,
