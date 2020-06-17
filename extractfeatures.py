@@ -1,5 +1,5 @@
 
-# CUDA_VISIBLE_DEVICES=0 python extractfeatures.py --database=KoNViD-1k --frame_batch_size=64
+# CUDA_VISIBLE_DEVICES=0 python extractfeatures.py --database=KoNViD-1k --frame_batch_size=32
 # CUDA_VISIBLE_DEVICES=1 python extractfeatures.py --database=CVD2014 --frame_batch_size=32
 # CUDA_VISIBLE_DEVICES=0 python extractfeatures.py --database=All --frame_batch_size=32
 
@@ -115,7 +115,7 @@ def get_features(video_data, frame_batch_size=64, device='cuda'):
 
 if __name__ == "__main__":
     parser = ArgumentParser(description='"Extracting Content-Aware Perceptual Features using Pre-Trained ResNet-50')
-    parser.add_argument("--seed", type=int, default=19920517)
+    parser.add_argument("--seed", type=int, default=20200610)
     parser.add_argument('--database', default='KoNViD-1k', type=str,
                         help='database name (default: KoNViD-1k)')
     parser.add_argument('--frame_batch_size', type=int, default=64,
@@ -134,17 +134,17 @@ if __name__ == "__main__":
     torch.utils.backcompat.broadcast_warning.enabled = True
 
     if args.database == 'KoNViD-1k':
-        videos_dir = '/home/ldq/Downloads/KoNViD-1k/'  # videos dir
-        features_dir = 'CNN_features_KoNViD-1k/'  # features dir
-        datainfo = 'data/KoNViD-1kinfo.mat'  # database info: video_names, scores; video format, width, height, index, ref_ids, max_len, etc.
+        videos_dir = 'D:/30_TrainData/VQdata/KoNViD-1k/'    # videos dir
+        features_dir = 'traindata/KoNViD-1k_features/'      # features dir
+        datainfo = 'dataset/KoNViD-1kinfo.mat'              # database info: video_names, scores; video format, width, height, index, ref_ids, max_len, etc.
     if args.database == 'CVD2014':
-        videos_dir = '/media/ldq/Research/Data/CVD2014/'
-        features_dir = 'CNN_features_CVD2014/'
-        datainfo = 'data/CVD2014info.mat'
+        videos_dir = 'D:/30_TrainData/VQdata/CVD2014/'
+        features_dir = 'traindata/CVD2014_features/'
+        datainfo = 'dataset//CVD2014info.mat'
     if args.database == 'LIVE-Qualcomm':
-        videos_dir = '/media/ldq/Others/Data/12.LIVE-Qualcomm Mobile In-Capture Video Quality Database/'
-        features_dir = 'CNN_features_LIVE-Qualcomm/'
-        datainfo = 'data/LIVE-Qualcomminfo.mat'
+        videos_dir = 'D:/30_TrainData/VQdata/12.LIVE-QualcommDatabase/'
+        features_dir = 'traindata/LIVE-Qualcomm_features/'
+        datainfo = 'dataset//LIVE-Qualcomminfo.mat'
 
     if not os.path.exists(features_dir):
         os.makedirs(features_dir)
