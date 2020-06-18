@@ -134,17 +134,17 @@ if __name__ == "__main__":
     torch.utils.backcompat.broadcast_warning.enabled = True
 
     if args.database == 'KoNViD-1k':
-        videos_dir = 'D:/30_TrainData/VQdata/KoNViD-1k/'    # videos dir
+        videos_dir = 'D:/30_TrainData/VQdata/KoNViD-1k/vdata/'    # videos dir
         features_dir = 'traindata/KoNViD-1k_features/'      # features dir
         datainfo = 'dataset/KoNViD-1kinfo.mat'              # database info: video_names, scores; video format, width, height, index, ref_ids, max_len, etc.
     if args.database == 'CVD2014':
-        videos_dir = 'D:/30_TrainData/VQdata/CVD2014/'
+        videos_dir = 'D:/30_TrainData/VQdata/CVD2014/vdata/'
         features_dir = 'traindata/CVD2014_features/'
-        datainfo = 'dataset//CVD2014info.mat'
+        datainfo = 'dataset/CVD2014info.mat'
     if args.database == 'LIVE-Qualcomm':
-        videos_dir = 'D:/30_TrainData/VQdata/12.LIVE-QualcommDatabase/'
+        videos_dir = 'D:/30_TrainData/VQdata/12.LIVE-QualcommDatabase/vdata/'
         features_dir = 'traindata/LIVE-Qualcomm_features/'
-        datainfo = 'dataset//LIVE-Qualcomminfo.mat'
+        datainfo = 'dataset/LIVE-Qualcomminfo.mat'
 
     if not os.path.exists(features_dir):
         os.makedirs(features_dir)
@@ -153,6 +153,10 @@ if __name__ == "__main__":
 
     Info = h5py.File(datainfo, 'r')
     video_names = [Info[Info['video_names'][0, :][i]][()].tobytes()[::2].decode() for i in range(len(Info['video_names'][0, :]))]
+    #change name format 5319047612_960x540_8s.mp4
+    for i in range(len(video_names)):
+        video_names[i] = video_names[i].split("_")[0] + ".mp4"
+
     scores = Info['scores'][0, :]
     video_format = Info['video_format'][()].tobytes()[::2].decode()
     width = int(Info['width'][0])
@@ -163,7 +167,10 @@ if __name__ == "__main__":
         current_data = dataset[i]
         current_video = current_data['video']
         current_score = current_data['score']
-        print('Video {}: length {}'.format(i, current_video.shape[0]))
+        print('Video id {}: length {}'.format(i, current_video.shape[0]))
+
+        str_output = '{:0>7}'.format(i)
+
         features = get_features(current_video, args.frame_batch_size, device)
-        np.save(features_dir + str(i) + '_resnet-50_res5c', features.to('cpu').numpy())
-        np.save(features_dir + str(i) + '_score', current_score)
+        np.save(features_dir + str_output + '_bitstreamfts', features.to('cpu').numpy())
+        np.save(features_dir + str_output + '_score', current_score)
