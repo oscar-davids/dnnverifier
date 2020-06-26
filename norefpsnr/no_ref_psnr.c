@@ -53,6 +53,7 @@ int main(int argc, char **argv){
     FILE* foutMseBeta = NULL;
     FILE* foutPsnrBeta = NULL;
     FILE* foutPsnrLambda = NULL;
+
     FILE* foutFramePsnrLambda = NULL;
     FILE* foutFramePsnrBeta = NULL;
     FILE* foutFrameMseLambda = NULL;

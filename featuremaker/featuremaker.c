@@ -580,7 +580,7 @@ static PyMethodDef FeatureMethods[] = {
 };
 
 
-static struct PyModuleDef featuremaker_utils_module = {
+static struct PyModuleDef featuremaker = {
     PyModuleDef_HEAD_INIT,
     "featuremaker",   /* name of module */
     NULL,       /* module documentation, may be NULL */
