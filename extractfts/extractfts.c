@@ -8,6 +8,8 @@
 #include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
+#include "extractfts.h"
+
 
 //define part
 #define FF_INPUT_BUFFER_PADDING_SIZE 32
@@ -55,6 +57,11 @@ static int decode_packet(const AVPacket *pkt)
         if (ret >= 0) {
             int i;
             AVFrameSideData *sd;
+			H264Context *h;
+
+			//get macroblock
+			//get QP table
+			h = (H264Context*)video_dec_ctx->priv_data;
 
             video_frame_count++;
             sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
@@ -371,6 +378,7 @@ void create_and_load_mv_residual(
 }
 
 int decode_video(
+	const char* fname,
 	int gop_target,
 	int pos_target,
 	void** bgr_arr,
@@ -429,7 +437,7 @@ int decode_video(
 		return -1;
 	}
 	//Input File  
-	fp_in = fopen(filename, "rb");
+	fp_in = fopen(fname, "rb");
 	if (!fp_in) {
 		printf("Could not open input stream\n");
 		return -1;
@@ -629,7 +637,7 @@ int decode_video(
 	return 0;
 }
 
-static void load(char* fname, int gopidx, int framenum, int present, int acc)
+static void load(const char* fname, int gopidx, int framenum, int present, int acc)
 {
 
 	int gop_target, pos_target, representation, accumulate;
@@ -647,7 +655,7 @@ static void load(char* fname, int gopidx, int framenum, int present, int acc)
 	uint8_t *res_arr = NULL;
 
 
-	if (decode_video(gop_target, pos_target,
+	if (decode_video(fname, gop_target, pos_target,
 		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr,
 		representation,
 		accumulate) < 0) {
@@ -710,6 +718,9 @@ static void load(char* fname, int gopidx, int framenum, int present, int acc)
 
 int main(int argc, char **argv)
 {
+
+	
+
     int ret = 0;
     AVPacket pkt = { 0 };
 
@@ -718,6 +729,9 @@ int main(int argc, char **argv)
         exit(1);
     }
     src_filename = argv[1];
+
+	//load(src_filename, 0, 8, 1, 1);
+
 
     if (avformat_open_input(&fmt_ctx, src_filename, NULL, NULL) < 0) {
         fprintf(stderr, "Could not open source file %s\n", src_filename);

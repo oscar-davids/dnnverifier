@@ -21,6 +21,17 @@
   <ItemGroup>
     <ClCompile Include="extractfts.c" />
   </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="extractfts.h" />
+    <ClInclude Include="h264.h" />
+    <ClInclude Include="h264chroma.h" />
+    <ClInclude Include="h264dsp.h" />
+    <ClInclude Include="h264pred.h" />
+    <ClInclude Include="h264qpel.h" />
+    <ClInclude Include="h264_sei.h" />
+    <ClInclude Include="qpeldsp.h" />
+    <ClInclude Include="videodsp.h" />
+  </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
     <ProjectGuid>{A6AE7E88-0973-4D13-ABBF-4EEFAEACCFC9}</ProjectGuid>
