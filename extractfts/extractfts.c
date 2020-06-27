@@ -637,6 +637,361 @@ int decode_video(
 	return 0;
 }
 
+int decode_videowithffmpeg(
+	const char* fname,
+	int gop_target,
+	int pos_target,
+	void** bgr_arr,
+	void** mb_arr,
+	void** qp_arr,
+	void** mv_arr,
+	void** res_arr,
+	int representation,
+	int accumulate) {
+
+
+	int ret = 0;
+	AVPacket pkt = { 0 };
+
+	if (avformat_open_input(&fmt_ctx, fname, NULL, NULL) < 0) {
+		fprintf(stderr, "Could not open source file %s\n", fname);
+		exit(1);
+	}
+
+	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+		fprintf(stderr, "Could not find stream information\n");
+		exit(1);
+	}
+
+	open_codec_context(fmt_ctx, AVMEDIA_TYPE_VIDEO);
+
+	av_dump_format(fmt_ctx, 0, fname, 0);
+	if (!video_stream) {
+		fprintf(stderr, "Could not find video stream in the input, aborting\n");
+		ret = 1;
+		goto end;
+	}
+
+	frame = av_frame_alloc();
+	if (!frame) {
+		fprintf(stderr, "Could not allocate frame\n");
+		ret = AVERROR(ENOMEM);
+		goto end;
+	}
+
+	printf("framenum,source,blockw,blockh,srcx,srcy,dstx,dsty,flags\n");
+
+	/* read frames from the file */
+	while (av_read_frame(fmt_ctx, &pkt) >= 0) {
+		if (pkt.stream_index == video_stream_idx)
+		{
+			//ret = decode_packet(&pkt);
+			 ret = avcodec_send_packet(video_dec_ctx, &pkt);
+			if (ret < 0) {
+				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				return ret;
+			}
+
+			while (ret >= 0) {
+				ret = avcodec_receive_frame(video_dec_ctx, frame);
+				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+					break;
+				}
+				else if (ret < 0) {
+					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+					return ret;
+				}
+
+				if (ret >= 0) {
+					int i;
+					AVFrameSideData *sd;
+					H264Context *h;
+
+					//get macroblock
+					//get QP table
+					h = (H264Context*)video_dec_ctx->priv_data;
+
+					video_frame_count++;
+					sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
+					if (sd) {
+						const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
+						for (i = 0; i < sd->size / sizeof(*mvs); i++) {
+							const AVMotionVector *mv = &mvs[i];
+							printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
+								video_frame_count, mv->source,
+								mv->w, mv->h, mv->src_x, mv->src_y,
+								mv->dst_x, mv->dst_y, mv->flags);
+						}
+					}
+					av_frame_unref(frame);
+				}
+			}
+
+		}
+
+		av_packet_unref(&pkt);
+		if (ret < 0)
+			break;
+	}
+
+	/* flush cached frames */
+	decode_packet(NULL);
+end:
+	avcodec_free_context(&video_dec_ctx);
+	avformat_close_input(&fmt_ctx);
+	av_frame_free(&frame);
+	return ret < 0;
+
+
+
+	AVCodec *pCodec;
+	AVCodecContext *pCodecCtx = NULL;
+	AVCodecParserContext *pCodecParserCtx = NULL;
+
+	FILE *fp_in;
+	AVFrame *pFrame;
+	AVFrame *pFrameBGR;
+
+	const int in_buffer_size = 4096;
+	uint8_t *in_buffer = (uint8_t*)malloc(in_buffer_size + FF_INPUT_BUFFER_PADDING_SIZE);
+	memset(in_buffer + in_buffer_size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
+
+	uint8_t *cur_ptr;
+	int cur_size;
+	int cur_gop = -1;
+	AVPacket packet;
+	int got_picture;
+
+	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
+
+	//avcodec_register_all();
+
+	pCodec = avcodec_find_decoder(AV_CODEC_ID_MPEG4);
+	// pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);  
+	if (!pCodec) {
+		printf("Codec not found\n");
+		return -1;
+	}
+	pCodecCtx = avcodec_alloc_context3(pCodec);
+	if (!pCodecCtx) {
+		printf("Could not allocate video codec context\n");
+		return -1;
+	}
+
+	pCodecParserCtx = av_parser_init(AV_CODEC_ID_MPEG4);
+	// pCodecParserCtx=av_parser_init(AV_CODEC_ID_H264);  
+	if (!pCodecParserCtx) {
+		printf("Could not allocate video parser context\n");
+		return -1;
+	}
+
+	AVDictionary *opts = NULL;
+	av_dict_set(&opts, "flags2", "+export_mvs", 0);
+	if (avcodec_open2(pCodecCtx, pCodec, &opts) < 0) {
+		printf("Could not open codec\n");
+		return -1;
+	}
+	//Input File  
+	fp_in = fopen(fname, "rb");
+	if (!fp_in) {
+		printf("Could not open input stream\n");
+		return -1;
+	}
+
+	int cur_pos = 0;
+
+	pFrame = av_frame_alloc();
+	pFrameBGR = av_frame_alloc();
+
+	uint8_t *buffer = NULL;
+
+	av_init_packet(&packet);
+
+	int *accu_src = NULL;
+	int *accu_src_old = NULL;
+
+	while (1) {
+
+		cur_size = fread(in_buffer, 1, in_buffer_size, fp_in);
+		if (cur_size == 0)
+			break;
+		cur_ptr = in_buffer;
+
+		while (cur_size > 0) {
+
+			int len = av_parser_parse2(
+				pCodecParserCtx, pCodecCtx,
+				&packet.data, &packet.size,
+				cur_ptr, cur_size,
+				AV_NOPTS_VALUE, AV_NOPTS_VALUE, AV_NOPTS_VALUE);
+
+			cur_ptr += len;
+			cur_size -= len;
+
+			if (packet.size == 0)
+				continue;
+
+			if (pCodecParserCtx->pict_type == AV_PICTURE_TYPE_I) {
+				++cur_gop;
+			}
+
+			if (cur_gop == gop_target && cur_pos <= pos_target) {
+
+				//ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
+
+				int ret = avcodec_send_packet(pCodecCtx, &packet);
+				if (ret < 0) {
+					fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+					return ret;
+				}
+
+				while (ret >= 0) {
+					ret = avcodec_receive_frame(pCodecCtx, pFrame);
+					if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+						break;
+					}
+					else if (ret < 0) {
+						fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+						return ret;
+					}
+
+					if (ret >= 0) {
+						got_picture = 1;
+						break;
+					}
+				}
+
+				if (ret < 0) {
+					printf("Decode Error.\n");
+					return -1;
+				}
+				int h = pFrame->height;
+				int w = pFrame->width;
+
+				// Initialize arrays. 
+				if ((representation & GOTFM) && !(*bgr_arr)) { // get rgb
+					*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
+				}
+				if ((representation & GOTMB) && !(*mb_arr)) { // get macroblock
+					*mb_arr = malloc(w * h * sizeof(int));
+				}
+
+				if ((representation & GOTQP) && !(*qp_arr)) { // get qp
+					*qp_arr = malloc(w * h * sizeof(int));
+				}
+
+				if ((representation & GOTMV) && !(*mv_arr)) { // get motion vector
+					*mv_arr = malloc(w * h * sizeof(int));
+				}
+
+				if (representation == GOTRD && !(*res_arr)) { // get residual 
+					*res_arr = malloc(w * h * sizeof(int));
+				}
+				if ((representation & GOTMB) || (representation & GOTQP)) {
+					mb_stride = w / 16 + 1;
+					mb_sum = ((h + 15) >> 4)*(w / 16 + 1);
+					//mb_type = (int *)pFrame->mb_type;
+				}
+
+
+				if (got_picture) {
+
+					if ((cur_pos == 0 && accumulate  && representation == GOTRD) ||
+						(cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) ||
+						cur_pos == pos_target) {
+						create_and_load_bgr(pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, pos_target);
+					}
+
+					if (representation == GOTMV ||
+						representation == GOTRD) {
+						AVFrameSideData *sd;
+						sd = av_frame_get_side_data(pFrame, AV_FRAME_DATA_MOTION_VECTORS);
+						if (sd) {
+							if (accumulate || cur_pos == pos_target) {
+								create_and_load_mv_residual(
+									sd,
+									*bgr_arr, *mv_arr, *res_arr,
+									cur_pos,
+									accumulate,
+									representation,
+									accu_src,
+									accu_src_old,
+									w,
+									h,
+									pos_target);
+							}
+						}
+					}
+					cur_pos++;
+				}
+			}
+		}
+	}
+
+	//Flush Decoder  
+	packet.data = NULL;
+	packet.size = 0;
+	while (1) {
+		//ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
+		int ret = avcodec_send_packet(pCodecCtx, &packet);
+		if (ret < 0) {
+			fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+			return ret;
+		}
+
+		while (ret >= 0) {
+			ret = avcodec_receive_frame(pCodecCtx, pFrame);
+			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+				break;
+			}
+			else if (ret < 0) {
+				fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+				return ret;
+			}
+
+			if (ret >= 0) {
+				got_picture = 1;
+				break;
+			}
+		}
+		if (ret < 0) {
+			printf("Decode Error.\n");
+			return -1;
+		}
+		if (!got_picture) {
+			break;
+		}
+		else if (cur_gop == gop_target) {
+			if ((cur_pos == 0 && accumulate) ||
+				(cur_pos == pos_target - 1 && !accumulate) ||
+				cur_pos == pos_target) {
+				create_and_load_bgr(
+					pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, pos_target);
+			}
+		}
+	}
+
+	fclose(fp_in);
+
+	av_parser_close(pCodecParserCtx);
+
+	av_frame_free(&pFrame);
+	av_frame_free(&pFrameBGR);
+	avcodec_close(pCodecCtx);
+	av_free(pCodecCtx);
+	if ((representation == GOTMV ||
+		representation == GOTRD) && accumulate) {
+		if (accu_src) {
+			free(accu_src);
+		}
+		if (accu_src_old) {
+			free(accu_src_old);
+		}
+	}
+
+	return 0;
+}
+
 static void load(const char* fname, int gopidx, int framenum, int present, int acc)
 {
 
@@ -655,7 +1010,7 @@ static void load(const char* fname, int gopidx, int framenum, int present, int a
 	uint8_t *res_arr = NULL;
 
 
-	if (decode_video(fname, gop_target, pos_target,
+	if (decode_videowithffmpeg(fname, gop_target, pos_target,
 		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr,
 		representation,
 		accumulate) < 0) {
