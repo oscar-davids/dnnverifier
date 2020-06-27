@@ -652,6 +652,9 @@ int decode_videowithffmpeg(
 
 	int ret = 0;
 	AVPacket pkt = { 0 };
+	int got_picture;
+
+	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
 
 	if (avformat_open_input(&fmt_ctx, fname, NULL, NULL) < 0) {
 		fprintf(stderr, "Could not open source file %s\n", fname);
@@ -704,6 +707,35 @@ int decode_videowithffmpeg(
 
 				if (ret >= 0) {
 					int i;
+
+					int h = frame->height;
+					int w = frame->width;
+
+					// Initialize arrays. 
+					if ((representation & GOTFM) && !(*bgr_arr)) { // get rgb
+						*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
+					}
+					if ((representation & GOTMB) && !(*mb_arr)) { // get macroblock
+						*mb_arr = malloc(w * h * sizeof(int));
+					}
+
+					if ((representation & GOTQP) && !(*qp_arr)) { // get qp
+						*qp_arr = malloc(w * h * sizeof(int));
+					}
+
+					if ((representation & GOTMV) && !(*mv_arr)) { // get motion vector
+						*mv_arr = malloc(w * h * sizeof(int));
+					}
+
+					if (representation == GOTRD && !(*res_arr)) { // get residual 
+						*res_arr = malloc(w * h * sizeof(int));
+					}
+					if ((representation & GOTMB) || (representation & GOTQP)) {
+						mb_stride = w / 16 + 1;
+						mb_sum = ((h + 15) >> 4)*(w / 16 + 1);
+						//mb_type = (int *)pFrame->mb_type;
+					}
+
 					AVFrameSideData *sd;
 					H264Context *h;
 
@@ -760,9 +792,7 @@ end:
 	int cur_size;
 	int cur_gop = -1;
 	AVPacket packet;
-	int got_picture;
 
-	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
 
 	//avcodec_register_all();
 
@@ -928,49 +958,7 @@ end:
 		}
 	}
 
-	//Flush Decoder  
-	packet.data = NULL;
-	packet.size = 0;
-	while (1) {
-		//ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
-		int ret = avcodec_send_packet(pCodecCtx, &packet);
-		if (ret < 0) {
-			fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
-			return ret;
-		}
-
-		while (ret >= 0) {
-			ret = avcodec_receive_frame(pCodecCtx, pFrame);
-			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-				break;
-			}
-			else if (ret < 0) {
-				fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
-				return ret;
-			}
-
-			if (ret >= 0) {
-				got_picture = 1;
-				break;
-			}
-		}
-		if (ret < 0) {
-			printf("Decode Error.\n");
-			return -1;
-		}
-		if (!got_picture) {
-			break;
-		}
-		else if (cur_gop == gop_target) {
-			if ((cur_pos == 0 && accumulate) ||
-				(cur_pos == pos_target - 1 && !accumulate) ||
-				cur_pos == pos_target) {
-				create_and_load_bgr(
-					pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, pos_target);
-			}
-		}
-	}
-
+	
 	fclose(fp_in);
 
 	av_parser_close(pCodecParserCtx);
