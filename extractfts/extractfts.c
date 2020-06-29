@@ -37,50 +37,6 @@ static int video_frame_count = 0;
 static const char *filename = NULL;
 
 //function part
-static int decode_packet(const AVPacket *pkt)
-{
-    int ret = avcodec_send_packet(video_dec_ctx, pkt);
-    if (ret < 0) {
-        fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
-        return ret;
-    }
-
-    while (ret >= 0)  {
-        ret = avcodec_receive_frame(video_dec_ctx, frame);
-        if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-            break;
-        } else if (ret < 0) {
-            fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
-            return ret;
-        }
-
-        if (ret >= 0) {
-            int i;
-            AVFrameSideData *sd;
-			H264Context *h;
-
-			//get macroblock
-			//get QP table
-			h = (H264Context*)video_dec_ctx->priv_data;
-
-            video_frame_count++;
-            sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
-            if (sd) {
-                const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
-                for (i = 0; i < sd->size / sizeof(*mvs); i++) {
-                    const AVMotionVector *mv = &mvs[i];
-                    printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
-                        video_frame_count, mv->source,
-                        mv->w, mv->h, mv->src_x, mv->src_y,
-                        mv->dst_x, mv->dst_y, mv->flags);
-                }
-            }
-            av_frame_unref(frame);
-        }
-    }
-
-    return 0;
-}
 
 static int open_codec_context(AVFormatContext *fmt_ctx, enum AVMediaType type)
 {
@@ -637,6 +593,52 @@ int decode_video(
 	return 0;
 }
 
+static int decode_packet(const AVPacket *pkt)
+{
+	int ret = avcodec_send_packet(video_dec_ctx, pkt);
+	if (ret < 0) {
+		fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+		return ret;
+	}
+
+	while (ret >= 0) {
+		ret = avcodec_receive_frame(video_dec_ctx, frame);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+			break;
+		}
+		else if (ret < 0) {
+			fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+			return ret;
+		}
+
+		if (ret >= 0) {
+			int i;
+			AVFrameSideData *sd;
+			H264Context *hcontext;
+
+			//get macroblock
+			//get QP table
+			hcontext = (H264Context*)video_dec_ctx->priv_data;
+
+			video_frame_count++;
+			sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
+			if (sd) {
+				const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
+				for (i = 0; i < sd->size / sizeof(*mvs); i++) {
+					const AVMotionVector *mv = &mvs[i];
+					printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
+						video_frame_count, mv->source,
+						mv->w, mv->h, mv->src_x, mv->src_y,
+						mv->dst_x, mv->dst_y, mv->flags);
+				}
+			}
+			av_frame_unref(frame);
+		}
+	}
+
+	return 0;
+}
+
 int decode_videowithffmpeg(
 	const char* fname,
 	int gop_target,
@@ -686,6 +688,7 @@ int decode_videowithffmpeg(
 
 	/* read frames from the file */
 	while (av_read_frame(fmt_ctx, &pkt) >= 0) {
+
 		if (pkt.stream_index == video_stream_idx)
 		{
 			//ret = decode_packet(&pkt);
@@ -698,6 +701,7 @@ int decode_videowithffmpeg(
 			while (ret >= 0) {
 				ret = avcodec_receive_frame(video_dec_ctx, frame);
 				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+					ret = 0;
 					break;
 				}
 				else if (ret < 0) {
@@ -707,6 +711,8 @@ int decode_videowithffmpeg(
 
 				if (ret >= 0) {
 					int i;
+					AVFrameSideData *sd;
+					H264Context *hcontext;
 
 					int h = frame->height;
 					int w = frame->width;
@@ -736,14 +742,10 @@ int decode_videowithffmpeg(
 						//mb_type = (int *)pFrame->mb_type;
 					}
 
-					AVFrameSideData *sd;
-					H264Context *h;
-
 					//get macroblock
 					//get QP table
-					h = (H264Context*)video_dec_ctx->priv_data;
-
-					video_frame_count++;
+					hcontext = (H264Context*)video_dec_ctx->priv_data;
+					
 					sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
 					if (sd) {
 						const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
@@ -755,10 +757,11 @@ int decode_videowithffmpeg(
 								mv->dst_x, mv->dst_y, mv->flags);
 						}
 					}
+
+					video_frame_count++;
 					av_frame_unref(frame);
 				}
 			}
-
 		}
 
 		av_packet_unref(&pkt);
@@ -997,7 +1000,6 @@ static void load(const char* fname, int gopidx, int framenum, int present, int a
 	uint8_t *mv_arr = NULL;
 	uint8_t *res_arr = NULL;
 
-
 	if (decode_videowithffmpeg(fname, gop_target, pos_target,
 		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr,
 		representation,
@@ -1005,6 +1007,14 @@ static void load(const char* fname, int gopidx, int framenum, int present, int a
 		printf("Decoding video failed.\n");
 		
 	}
+
+	if (bgr_arr != NULL) free(bgr_arr);
+	if (final_bgr_arr != NULL) free(final_bgr_arr);
+	if (mb_arr != NULL) free(mb_arr);
+	if (qp_arr != NULL) free(qp_arr);
+	if (mv_arr != NULL) free(mv_arr);
+	if (res_arr != NULL) free(res_arr);
+
 	/*
 	PyArrayObject *bgr_arr = NULL;
 	PyArrayObject *final_bgr_arr = NULL;
@@ -1073,7 +1083,7 @@ int main(int argc, char **argv)
     }
     src_filename = argv[1];
 
-	//load(src_filename, 0, 8, 1, 1);
+	load(src_filename, 0, 8, 1, 1);
 
 
     if (avformat_open_input(&fmt_ctx, src_filename, NULL, NULL) < 0) {
