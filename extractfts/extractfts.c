@@ -263,7 +263,7 @@ void create_and_load_mv_residual(
 						p_src_x >= 0 && p_src_x < width) {
 
 						// Write MV. 
-						if (accumulate) {
+						if (accumulate && accu_src && accu_src_old) {
 							for (int c = 0; c < 2; ++c) {
 								accu_src[p_dst_x * height * 2 + p_dst_y * 2 + c]
 									= accu_src_old[p_src_x * height * 2 + p_src_y * 2 + c];
@@ -278,7 +278,7 @@ void create_and_load_mv_residual(
 			}
 		}
 	}
-	if (accumulate) {
+	if (accumulate && accu_src && accu_src_old) {
 		memcpy(accu_src_old, accu_src, width * height * 2 * sizeof(int));
 	}
 	if (cur_pos > 0) {
@@ -310,7 +310,7 @@ void create_and_load_mv_residual(
 				int32_t tmp;
 				for (x = 0; x < width; ++x) {
 					tmp = x * height * 2 + y * 2;
-					if (accumulate) {
+					if (accumulate && accu_src) {
 						src_x = accu_src[tmp];
 						src_y = accu_src[tmp + 1];
 					}
@@ -655,6 +655,10 @@ int decode_videowithffmpeg(
 	int ret = 0;
 	AVPacket pkt = { 0 };
 	int got_picture;
+	int cur_pos = 0;
+	AVFrame *pFrameBGR = NULL;
+	int *accu_src = NULL;
+	int *accu_src_old = NULL;
 
 	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
 
@@ -714,6 +718,12 @@ int decode_videowithffmpeg(
 					AVFrameSideData *sd;
 					H264Context *hcontext;
 
+					if ((cur_pos == 0 && accumulate  && representation == GOTRD) ||
+						(cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) ||
+						cur_pos == pos_target) {
+						create_and_load_bgr(frame, pFrameBGR, NULL, bgr_arr, cur_pos, pos_target);
+					}
+
 					int h = frame->height;
 					int w = frame->width;
 
@@ -730,7 +740,7 @@ int decode_videowithffmpeg(
 					}
 
 					if ((representation & GOTMV) && !(*mv_arr)) { // get motion vector
-						*mv_arr = malloc(w * h * sizeof(int));
+						*mv_arr = malloc(w * h * 2 * sizeof(int));
 					}
 
 					if (representation == GOTRD && !(*res_arr)) { // get residual 
@@ -820,6 +830,28 @@ int decode_videowithffmpeg(
 						}
 					}					
 					
+					if (representation == GOTMV ||
+						representation == GOTRD) {
+						AVFrameSideData *sd;
+						sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
+						if (sd) {
+							if (accumulate || cur_pos == pos_target) {
+								create_and_load_mv_residual(
+									sd,
+									*bgr_arr, *mv_arr, *res_arr,
+									cur_pos,
+									accumulate,
+									representation,
+									accu_src,
+									accu_src_old,
+									w,
+									h,
+									pos_target);
+							}
+						}
+					}
+					cur_pos++;
+					/*
 					if (representation & GOTMV) {
 						sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
 						if (sd) {
@@ -833,6 +865,7 @@ int decode_videowithffmpeg(
 							}
 						}
 					}
+					*/
 					video_frame_count++;
 					av_frame_unref(frame);
 				}
@@ -859,8 +892,7 @@ end:
 	AVCodecParserContext *pCodecParserCtx = NULL;
 
 	FILE *fp_in;
-	AVFrame *pFrame;
-	AVFrame *pFrameBGR;
+	AVFrame *pFrame;	
 
 	const int in_buffer_size = 4096;
 	uint8_t *in_buffer = (uint8_t*)malloc(in_buffer_size + FF_INPUT_BUFFER_PADDING_SIZE);
@@ -905,9 +937,7 @@ end:
 		printf("Could not open input stream\n");
 		return -1;
 	}
-
-	int cur_pos = 0;
-
+	
 	pFrame = av_frame_alloc();
 	pFrameBGR = av_frame_alloc();
 
@@ -915,8 +945,7 @@ end:
 
 	av_init_packet(&packet);
 
-	int *accu_src = NULL;
-	int *accu_src_old = NULL;
+
 
 	while (1) {
 
