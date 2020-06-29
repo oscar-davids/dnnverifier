@@ -742,22 +742,97 @@ int decode_videowithffmpeg(
 						//mb_type = (int *)pFrame->mb_type;
 					}
 
-					//get macroblock
-					//get QP table
 					hcontext = (H264Context*)video_dec_ctx->priv_data;
-					
-					sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
-					if (sd) {
-						const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
-						for (i = 0; i < sd->size / sizeof(*mvs); i++) {
-							const AVMotionVector *mv = &mvs[i];
-							printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
-								video_frame_count, mv->source,
-								mv->w, mv->h, mv->src_x, mv->src_y,
-								mv->dst_x, mv->dst_y, mv->flags);
+					//get QP table
+					if (hcontext && (representation & GOTQP)) {
+						
+						H264Picture *pic = hcontext->next_output_pic;
+						uint8_t *d_arr = (uint8_t *)*qp_arr;
+
+						if (pic && pic->qscale_table && d_arr)
+						{
+							for (int j = 0; j < hcontext->mb_height; j++) {
+								for (int i = 0; i < hcontext->mb_width; i++) {
+									int num = j * hcontext->mb_stride + i;
+									d_arr[hcontext->mb_width*j + i] += pic->qscale_table[num];									
+								}
+							}
 						}
 					}
+					//get macroblock
+					if (hcontext && (representation & GOTMB)) {
+						hcontext = (H264Context*)video_dec_ctx->priv_data;
+						H264Picture *pic = hcontext->next_output_pic;
+						uint8_t *d_arr = (uint8_t *)*mb_arr;
 
+						if (pic && d_arr)
+						{
+							for (int j = 0; j < hcontext->mb_height; j++) {
+								for (int i = 0; i < hcontext->mb_width; i++) {
+									int num = j * hcontext->mb_stride + i;
+									int mbtype = pic->mb_type[num];
+
+									if (mbtype & MB_TYPE_INTRA4x4) {
+										d_arr[hcontext->mb_width*j + i] += 10;
+									}
+									if (mbtype&MB_TYPE_INTRA16x16) {
+										d_arr[hcontext->mb_width*j + i] += 9;
+									}
+									if (mbtype&MB_TYPE_INTRA_PCM) {
+										d_arr[hcontext->mb_width*j + i] += 8;
+									}
+									if (mbtype&MB_TYPE_16x16) {
+										d_arr[hcontext->mb_width*j + i] += 7;
+									}
+									if (mbtype&MB_TYPE_16x8) {
+										d_arr[hcontext->mb_width*j + i] += 6;
+									}
+									if (mbtype&MB_TYPE_8x16) {
+										d_arr[hcontext->mb_width*j + i] += 5;
+									}
+									if (mbtype&MB_TYPE_8x8) {
+										d_arr[hcontext->mb_width*j + i] += 4;
+									}
+									if (mbtype&MB_TYPE_SKIP) {
+										d_arr[hcontext->mb_width*j + i] += 3;
+									}
+									if (mbtype&MB_TYPE_L0) {
+										d_arr[hcontext->mb_width*j + i] += 2;
+									}
+									if (mbtype&MB_TYPE_L1) {
+										d_arr[hcontext->mb_width*j + i] += 1;
+									}
+									///don't often used
+									if (mbtype&MB_TYPE_INTERLACED) {										
+									}
+									if (mbtype&MB_TYPE_DIRECT2) {										
+									}
+									if (mbtype&MB_TYPE_ACPRED) {										
+									}
+									if (mbtype&MB_TYPE_GMC) {										
+									}
+									if (mbtype&MB_TYPE_QUANT) {										
+									}
+									if (mbtype&MB_TYPE_CBP) {										
+									}
+								}
+							}
+						}
+					}					
+					
+					if (representation & GOTMV) {
+						sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
+						if (sd) {
+							const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
+							for (i = 0; i < sd->size / sizeof(*mvs); i++) {
+								const AVMotionVector *mv = &mvs[i];
+								printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
+									video_frame_count, mv->source,
+									mv->w, mv->h, mv->src_x, mv->src_y,
+									mv->dst_x, mv->dst_y, mv->flags);
+							}
+						}
+					}
 					video_frame_count++;
 					av_frame_unref(frame);
 				}
@@ -1083,7 +1158,7 @@ int main(int argc, char **argv)
     }
     src_filename = argv[1];
 
-	load(src_filename, 0, 8, 1, 1);
+	load(src_filename, 0, 8, 3, 1);
 
 
     if (avformat_open_input(&fmt_ctx, src_filename, NULL, NULL) < 0) {
