@@ -20,9 +20,19 @@
 #define GOTMV 8
 #define GOTRD 16
 
+#define NORMALW		64
+#define NORMALH		64
+#define HALFNORMALH 32
 //typedef part
 typedef unsigned char uint8_t;
 
+typedef struct sizeInfo {
+	int w;
+	int h;
+	int mw;
+	int mh;
+	int repeat;
+} sizeInfo;
 
 //variable part
 static AVFormatContext *fmt_ctx = NULL;
@@ -212,13 +222,15 @@ void create_and_load_bgr(AVFrame *pFrame, AVFrame *pFrameBGR, uint8_t *buffer,
 	uint8_t *src = (uint8_t*)pFrameBGR->data[0];
 	uint8_t *dest = (uint8_t*)(*arr);
 
-	int array_idx;
+	int array_idx = 0;
+	/*
 	if (cur_pos == pos_target) {
 		array_idx = 1;
 	}
 	else {
 		array_idx = 0;
 	}
+	*/
 	memcpy(dest + array_idx * stride_0, src, height * linesize * sizeof(uint8_t));
 	av_free(buffer);
 }
@@ -239,6 +251,7 @@ void create_and_load_mv_residual(
 
 	int p_dst_x, p_dst_y, p_src_x, p_src_y, val_x, val_y;
 	const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
+	int *pdest = NULL;
 
 	for (int i = 0; i < sd->size / sizeof(*mvs); i++) {
 		const AVMotionVector *mv = &mvs[i];
@@ -265,8 +278,8 @@ void create_and_load_mv_residual(
 						// Write MV. 
 						if (accumulate && accu_src && accu_src_old) {
 							for (int c = 0; c < 2; ++c) {
-								accu_src[p_dst_x * height * 2 + p_dst_y * 2 + c]
-									= accu_src_old[p_src_x * height * 2 + p_src_y * 2 + c];
+								accu_src[p_dst_y * height * 2 + p_dst_x * 2 + c]
+									= accu_src_old[p_src_y * height * 2 + p_src_x * 2 + c];
 							}
 						}
 						else {
@@ -284,17 +297,19 @@ void create_and_load_mv_residual(
 	if (cur_pos > 0) {
 		if (accumulate) {
 			if (representation == GOTMV && cur_pos == pos_target) {
-				for (int x = 0; x < width; ++x) {
-					for (int y = 0; y < height; ++y) {
+				pdest = (int*)mv_arr;
+				for (int y = 0; y < height; ++y) {
+					for (int x = 0; x < width; ++x) {
 						//*((int32_t*)PyArray_GETPTR3(mv_arr, y, x, 0))
 						//	= x - accu_src[x * height * 2 + y * 2];
 						//*((int32_t*)PyArray_GETPTR3(mv_arr, y, x, 1))
 						//	= y - accu_src[x * height * 2 + y * 2 + 1];
+						pdest[height * y + x] = (x - accu_src[y * height * 2 + x * 2]) + (y - accu_src[y * height * 2 + x * 2 + 1]);
 					}
 				}
 			}
 		}
-		if (representation == GOTRD && cur_pos == pos_target) {
+		if (representation == GOTRD && cur_pos == pos_target && bgr_arr && res_arr) {
 
 			uint8_t *bgr_data = (uint8_t*)bgr_arr;
 			int32_t *res_data = (int32_t*)res_arr;
@@ -309,7 +324,7 @@ void create_and_load_mv_residual(
 				int c, x, src_x, src_y, location, location2, location_src;
 				int32_t tmp;
 				for (x = 0; x < width; ++x) {
-					tmp = x * height * 2 + y * 2;
+					tmp = y * height * 2 + x * 2;
 					if (accumulate && accu_src) {
 						src_x = accu_src[tmp];
 						src_y = accu_src[tmp + 1];
@@ -640,16 +655,10 @@ static int decode_packet(const AVPacket *pkt)
 }
 
 int decode_videowithffmpeg(
-	const char* fname,
-	int gop_target,
-	int pos_target,
-	void** bgr_arr,
-	void** mb_arr,
-	void** qp_arr,
-	void** mv_arr,
-	void** res_arr,
-	int representation,
-	int accumulate) {
+	const char* fname, int gop_target, int pos_target,
+	void** bgr_arr,	void** mb_arr,	void** qp_arr,
+	void** mv_arr,	void** res_arr,
+	int representation,	int accumulate, sizeInfo *szInfo) {
 
 
 	int ret = 0;
@@ -689,9 +698,10 @@ int decode_videowithffmpeg(
 	}
 
 	printf("framenum,source,blockw,blockh,srcx,srcy,dstx,dsty,flags\n");
+	int cur_gop = -1;
 
 	/* read frames from the file */
-	while (av_read_frame(fmt_ctx, &pkt) >= 0) {
+	while (av_read_frame(fmt_ctx, &pkt) >= 0 && cur_pos < pos_target) {
 
 		if (pkt.stream_index == video_stream_idx)
 		{
@@ -712,163 +722,177 @@ int decode_videowithffmpeg(
 					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
 					return ret;
 				}
-
-				if (ret >= 0) {
-					int i;
-					AVFrameSideData *sd;
-					H264Context *hcontext;
-
-					if ((cur_pos == 0 && accumulate  && representation == GOTRD) ||
-						(cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) ||
-						cur_pos == pos_target) {
-						create_and_load_bgr(frame, pFrameBGR, NULL, bgr_arr, cur_pos, pos_target);
-					}
-
-					int h = frame->height;
-					int w = frame->width;
-
-					// Initialize arrays. 
-					if ((representation & GOTFM) && !(*bgr_arr)) { // get rgb
-						*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
-					}
-					if ((representation & GOTMB) && !(*mb_arr)) { // get macroblock
-						*mb_arr = malloc(w * h * sizeof(int));
-					}
-
-					if ((representation & GOTQP) && !(*qp_arr)) { // get qp
-						*qp_arr = malloc(w * h * sizeof(int));
-					}
-
-					if ((representation & GOTMV) && !(*mv_arr)) { // get motion vector
-						*mv_arr = malloc(w * h * 2 * sizeof(int));
-					}
-
-					if (representation == GOTRD && !(*res_arr)) { // get residual 
-						*res_arr = malloc(w * h * sizeof(int));
-					}
-					if ((representation & GOTMB) || (representation & GOTQP)) {
-						mb_stride = w / 16 + 1;
-						mb_sum = ((h + 15) >> 4)*(w / 16 + 1);
-						//mb_type = (int *)pFrame->mb_type;
-					}
-
-					hcontext = (H264Context*)video_dec_ctx->priv_data;
-					//get QP table
-					if (hcontext && (representation & GOTQP)) {
-						
-						H264Picture *pic = hcontext->next_output_pic;
-						uint8_t *d_arr = (uint8_t *)*qp_arr;
-
-						if (pic && pic->qscale_table && d_arr)
-						{
-							for (int j = 0; j < hcontext->mb_height; j++) {
-								for (int i = 0; i < hcontext->mb_width; i++) {
-									int num = j * hcontext->mb_stride + i;
-									d_arr[hcontext->mb_width*j + i] += pic->qscale_table[num];									
-								}
-							}
-						}
-					}
-					//get macroblock
-					if (hcontext && (representation & GOTMB)) {
-						hcontext = (H264Context*)video_dec_ctx->priv_data;
-						H264Picture *pic = hcontext->next_output_pic;
-						uint8_t *d_arr = (uint8_t *)*mb_arr;
-
-						if (pic && d_arr)
-						{
-							for (int j = 0; j < hcontext->mb_height; j++) {
-								for (int i = 0; i < hcontext->mb_width; i++) {
-									int num = j * hcontext->mb_stride + i;
-									int mbtype = pic->mb_type[num];
-
-									if (mbtype & MB_TYPE_INTRA4x4) {
-										d_arr[hcontext->mb_width*j + i] += 10;
-									}
-									if (mbtype&MB_TYPE_INTRA16x16) {
-										d_arr[hcontext->mb_width*j + i] += 9;
-									}
-									if (mbtype&MB_TYPE_INTRA_PCM) {
-										d_arr[hcontext->mb_width*j + i] += 8;
-									}
-									if (mbtype&MB_TYPE_16x16) {
-										d_arr[hcontext->mb_width*j + i] += 7;
-									}
-									if (mbtype&MB_TYPE_16x8) {
-										d_arr[hcontext->mb_width*j + i] += 6;
-									}
-									if (mbtype&MB_TYPE_8x16) {
-										d_arr[hcontext->mb_width*j + i] += 5;
-									}
-									if (mbtype&MB_TYPE_8x8) {
-										d_arr[hcontext->mb_width*j + i] += 4;
-									}
-									if (mbtype&MB_TYPE_SKIP) {
-										d_arr[hcontext->mb_width*j + i] += 3;
-									}
-									if (mbtype&MB_TYPE_L0) {
-										d_arr[hcontext->mb_width*j + i] += 2;
-									}
-									if (mbtype&MB_TYPE_L1) {
-										d_arr[hcontext->mb_width*j + i] += 1;
-									}
-									///don't often used
-									if (mbtype&MB_TYPE_INTERLACED) {										
-									}
-									if (mbtype&MB_TYPE_DIRECT2) {										
-									}
-									if (mbtype&MB_TYPE_ACPRED) {										
-									}
-									if (mbtype&MB_TYPE_GMC) {										
-									}
-									if (mbtype&MB_TYPE_QUANT) {										
-									}
-									if (mbtype&MB_TYPE_CBP) {										
-									}
-								}
-							}
-						}
-					}					
-					
-					if (representation == GOTMV ||
-						representation == GOTRD) {
-						AVFrameSideData *sd;
-						sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
-						if (sd) {
-							if (accumulate || cur_pos == pos_target) {
-								create_and_load_mv_residual(
-									sd,
-									*bgr_arr, *mv_arr, *res_arr,
-									cur_pos,
-									accumulate,
-									representation,
-									accu_src,
-									accu_src_old,
-									w,
-									h,
-									pos_target);
-							}
-						}
-					}
-					cur_pos++;
-					/*
-					if (representation & GOTMV) {
-						sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
-						if (sd) {
-							const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
-							for (i = 0; i < sd->size / sizeof(*mvs); i++) {
-								const AVMotionVector *mv = &mvs[i];
-								printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
-									video_frame_count, mv->source,
-									mv->w, mv->h, mv->src_x, mv->src_y,
-									mv->dst_x, mv->dst_y, mv->flags);
-							}
-						}
-					}
-					*/
-					video_frame_count++;
-					av_frame_unref(frame);
+				if (frame->pict_type == AV_PICTURE_TYPE_I) {
+					++cur_gop;
 				}
+
+				if (cur_gop == gop_target && cur_pos <= pos_target)
+				{
+					if (ret >= 0) {
+						int i;
+						AVFrameSideData *sd;
+						H264Context *hcontext;
+
+						int h = frame->height;
+						int w = frame->width;
+
+						// Initialize arrays. 
+						if ((representation & GOTFM) && !(*bgr_arr)) { // get rgb
+							*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
+							memset(*bgr_arr, 0x00, w * h * 3 * sizeof(uint8_t));
+						}
+						if ((representation & GOTMB) && !(*mb_arr)) { // get macroblock
+							*mb_arr = malloc(w * h * sizeof(int));
+							memset(*mb_arr, 0x00, w * h * sizeof(int));
+						}
+
+						if ((representation & GOTQP) && !(*qp_arr)) { // get qp
+							*qp_arr = malloc(w * h * sizeof(int));
+							memset(*qp_arr, 0x00, w * h * sizeof(int));
+						}
+
+						if ((representation & GOTMV) && !(*mv_arr)) { // get motion vector
+							*mv_arr = malloc(w * h * 2 * sizeof(int));
+							memset(*mv_arr, 0x00, w * h * 2 * sizeof(int));
+						}
+
+						if (representation == GOTRD && !(*res_arr)) { // get residual 
+							*res_arr = malloc(w * h * 3 * sizeof(int));
+							memset(*res_arr, 0x00, w * h * 3 * sizeof(int));
+						}
+						if ((representation & GOTMB) || (representation & GOTQP)) {
+							mb_stride = w / 16 + 1;
+							mb_sum = ((h + 15) >> 4)*(w / 16 + 1);
+							//mb_type = (int *)pFrame->mb_type;
+						}
+						if ((representation == GOTMV || representation == GOTRD) && accumulate && !accu_src && !accu_src_old) {
+							accu_src = (int*)malloc(w * h * 2 * sizeof(int));
+							accu_src_old = (int*)malloc(w * h * 2 * sizeof(int));
+
+							for (size_t x = 0; x < w; ++x) {
+								for (size_t y = 0; y < h; ++y) {
+									accu_src_old[x * h * 2 + y * 2] = x;
+									accu_src_old[x * h * 2 + y * 2 + 1] = y;
+								}
+							}
+							memcpy(accu_src, accu_src_old, h * w * 2 * sizeof(int));
+						}
+
+						szInfo->w = w;
+						szInfo->h = h;
+
+						hcontext = (H264Context*)video_dec_ctx->priv_data;
+
+						//get macroblock
+						if (hcontext && (representation & GOTMB)) {
+							hcontext = (H264Context*)video_dec_ctx->priv_data;
+							H264Picture *pic = hcontext->next_output_pic;
+							uint8_t *d_arr = (uint8_t *)*mb_arr;
+
+							if (pic && d_arr)
+							{
+								for (int j = 0; j < hcontext->mb_height; j++) {
+									for (int i = 0; i < hcontext->mb_width; i++) {
+										int num = j * hcontext->mb_stride + i;
+										int mbtype = pic->mb_type[num];
+
+										if (mbtype & MB_TYPE_INTRA4x4) {
+											d_arr[hcontext->mb_width*j + i] += 10;
+										}
+										if (mbtype&MB_TYPE_INTRA16x16) {
+											d_arr[hcontext->mb_width*j + i] += 9;
+										}
+										if (mbtype&MB_TYPE_INTRA_PCM) {
+											d_arr[hcontext->mb_width*j + i] += 8;
+										}
+										if (mbtype&MB_TYPE_16x16) {
+											d_arr[hcontext->mb_width*j + i] += 7;
+										}
+										if (mbtype&MB_TYPE_16x8) {
+											d_arr[hcontext->mb_width*j + i] += 6;
+										}
+										if (mbtype&MB_TYPE_8x16) {
+											d_arr[hcontext->mb_width*j + i] += 5;
+										}
+										if (mbtype&MB_TYPE_8x8) {
+											d_arr[hcontext->mb_width*j + i] += 4;
+										}
+										if (mbtype&MB_TYPE_SKIP) {
+											d_arr[hcontext->mb_width*j + i] += 3;
+										}
+										if (mbtype&MB_TYPE_L0) {
+											d_arr[hcontext->mb_width*j + i] += 2;
+										}
+										if (mbtype&MB_TYPE_L1) {
+											d_arr[hcontext->mb_width*j + i] += 1;
+										}
+										///don't often used
+										if (mbtype&MB_TYPE_INTERLACED) {
+										}
+										if (mbtype&MB_TYPE_DIRECT2) {
+										}
+										if (mbtype&MB_TYPE_ACPRED) {
+										}
+										if (mbtype&MB_TYPE_GMC) {
+										}
+										if (mbtype&MB_TYPE_QUANT) {
+										}
+										if (mbtype&MB_TYPE_CBP) {
+										}
+									}
+								}
+
+								szInfo->mw = hcontext->mb_width;
+								szInfo->mh = hcontext->mb_height;
+							}
+						}
+						//get QP table
+						if (hcontext && (representation & GOTQP)) {
+
+							H264Picture *pic = hcontext->next_output_pic;
+							uint8_t *d_arr = (uint8_t *)*qp_arr;
+
+							if (pic && pic->qscale_table && d_arr)
+							{
+								for (int j = 0; j < hcontext->mb_height; j++) {
+									for (int i = 0; i < hcontext->mb_width; i++) {
+										int num = j * hcontext->mb_stride + i;
+										d_arr[hcontext->mb_width*j + i] += pic->qscale_table[num];
+									}
+								}
+							}
+						}
+
+						if ((cur_pos == 0 && accumulate  && representation == GOTRD) ||
+							(cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) || cur_pos == pos_target) {
+							create_and_load_bgr(frame, pFrameBGR, NULL, bgr_arr, cur_pos, pos_target);
+						}
+						if (representation == GOTMV ||
+							representation == GOTRD) {
+							AVFrameSideData *sd;
+							sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
+							if (sd) {
+								if (accumulate || cur_pos == pos_target) {
+									create_and_load_mv_residual(
+										sd,
+										*bgr_arr, *mv_arr, *res_arr,
+										cur_pos,
+										accumulate,
+										representation,
+										accu_src,
+										accu_src_old,
+										w,
+										h,
+										pos_target);
+								}
+							}
+						}
+						cur_pos++;
+
+						av_frame_unref(frame);
+					}
+				}
+				
 			}
 		}
 
@@ -877,205 +901,17 @@ int decode_videowithffmpeg(
 			break;
 	}
 
+	szInfo->repeat = cur_pos;
+
 	/* flush cached frames */
 	decode_packet(NULL);
 end:
 	avcodec_free_context(&video_dec_ctx);
 	avformat_close_input(&fmt_ctx);
 	av_frame_free(&frame);
-	return ret < 0;
-
-
-
-	AVCodec *pCodec;
-	AVCodecContext *pCodecCtx = NULL;
-	AVCodecParserContext *pCodecParserCtx = NULL;
-
-	FILE *fp_in;
-	AVFrame *pFrame;	
-
-	const int in_buffer_size = 4096;
-	uint8_t *in_buffer = (uint8_t*)malloc(in_buffer_size + FF_INPUT_BUFFER_PADDING_SIZE);
-	memset(in_buffer + in_buffer_size, 0, FF_INPUT_BUFFER_PADDING_SIZE);
-
-	uint8_t *cur_ptr;
-	int cur_size;
-	int cur_gop = -1;
-	AVPacket packet;
-
-
-	//avcodec_register_all();
-
-	pCodec = avcodec_find_decoder(AV_CODEC_ID_MPEG4);
-	// pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);  
-	if (!pCodec) {
-		printf("Codec not found\n");
-		return -1;
-	}
-	pCodecCtx = avcodec_alloc_context3(pCodec);
-	if (!pCodecCtx) {
-		printf("Could not allocate video codec context\n");
-		return -1;
-	}
-
-	pCodecParserCtx = av_parser_init(AV_CODEC_ID_MPEG4);
-	// pCodecParserCtx=av_parser_init(AV_CODEC_ID_H264);  
-	if (!pCodecParserCtx) {
-		printf("Could not allocate video parser context\n");
-		return -1;
-	}
-
-	AVDictionary *opts = NULL;
-	av_dict_set(&opts, "flags2", "+export_mvs", 0);
-	if (avcodec_open2(pCodecCtx, pCodec, &opts) < 0) {
-		printf("Could not open codec\n");
-		return -1;
-	}
-	//Input File  
-	fp_in = fopen(fname, "rb");
-	if (!fp_in) {
-		printf("Could not open input stream\n");
-		return -1;
-	}
-	
-	pFrame = av_frame_alloc();
-	pFrameBGR = av_frame_alloc();
-
-	uint8_t *buffer = NULL;
-
-	av_init_packet(&packet);
-
-
-
-	while (1) {
-
-		cur_size = fread(in_buffer, 1, in_buffer_size, fp_in);
-		if (cur_size == 0)
-			break;
-		cur_ptr = in_buffer;
-
-		while (cur_size > 0) {
-
-			int len = av_parser_parse2(
-				pCodecParserCtx, pCodecCtx,
-				&packet.data, &packet.size,
-				cur_ptr, cur_size,
-				AV_NOPTS_VALUE, AV_NOPTS_VALUE, AV_NOPTS_VALUE);
-
-			cur_ptr += len;
-			cur_size -= len;
-
-			if (packet.size == 0)
-				continue;
-
-			if (pCodecParserCtx->pict_type == AV_PICTURE_TYPE_I) {
-				++cur_gop;
-			}
-
-			if (cur_gop == gop_target && cur_pos <= pos_target) {
-
-				//ret = avcodec_decode_video2(pCodecCtx, pFrame, &got_picture, &packet);
-
-				int ret = avcodec_send_packet(pCodecCtx, &packet);
-				if (ret < 0) {
-					fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
-					return ret;
-				}
-
-				while (ret >= 0) {
-					ret = avcodec_receive_frame(pCodecCtx, pFrame);
-					if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
-						break;
-					}
-					else if (ret < 0) {
-						fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
-						return ret;
-					}
-
-					if (ret >= 0) {
-						got_picture = 1;
-						break;
-					}
-				}
-
-				if (ret < 0) {
-					printf("Decode Error.\n");
-					return -1;
-				}
-				int h = pFrame->height;
-				int w = pFrame->width;
-
-				// Initialize arrays. 
-				if ((representation & GOTFM) && !(*bgr_arr)) { // get rgb
-					*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
-				}
-				if ((representation & GOTMB) && !(*mb_arr)) { // get macroblock
-					*mb_arr = malloc(w * h * sizeof(int));
-				}
-
-				if ((representation & GOTQP) && !(*qp_arr)) { // get qp
-					*qp_arr = malloc(w * h * sizeof(int));
-				}
-
-				if ((representation & GOTMV) && !(*mv_arr)) { // get motion vector
-					*mv_arr = malloc(w * h * sizeof(int));
-				}
-
-				if (representation == GOTRD && !(*res_arr)) { // get residual 
-					*res_arr = malloc(w * h * sizeof(int));
-				}
-				if ((representation & GOTMB) || (representation & GOTQP)) {
-					mb_stride = w / 16 + 1;
-					mb_sum = ((h + 15) >> 4)*(w / 16 + 1);
-					//mb_type = (int *)pFrame->mb_type;
-				}
-
-
-				if (got_picture) {
-
-					if ((cur_pos == 0 && accumulate  && representation == GOTRD) ||
-						(cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) ||
-						cur_pos == pos_target) {
-						create_and_load_bgr(pFrame, pFrameBGR, buffer, bgr_arr, cur_pos, pos_target);
-					}
-
-					if (representation == GOTMV ||
-						representation == GOTRD) {
-						AVFrameSideData *sd;
-						sd = av_frame_get_side_data(pFrame, AV_FRAME_DATA_MOTION_VECTORS);
-						if (sd) {
-							if (accumulate || cur_pos == pos_target) {
-								create_and_load_mv_residual(
-									sd,
-									*bgr_arr, *mv_arr, *res_arr,
-									cur_pos,
-									accumulate,
-									representation,
-									accu_src,
-									accu_src_old,
-									w,
-									h,
-									pos_target);
-							}
-						}
-					}
-					cur_pos++;
-				}
-			}
-		}
-	}
-
-	
-	fclose(fp_in);
-
-	av_parser_close(pCodecParserCtx);
-
-	av_frame_free(&pFrame);
 	av_frame_free(&pFrameBGR);
-	avcodec_close(pCodecCtx);
-	av_free(pCodecCtx);
-	if ((representation == GOTMV ||
-		representation == GOTRD) && accumulate) {
+
+	if ((representation == GOTMV || representation == GOTRD) && accumulate) {
 		if (accu_src) {
 			free(accu_src);
 		}
@@ -1085,6 +921,56 @@ end:
 	}
 
 	return 0;
+	
+}
+
+#define getByte(value, n) (value >> (n*8) & 0xFF)
+
+uint32_t getpixel(int *image, int w, unsigned int x, unsigned int y) {
+	return image[(y*w) + x];
+}
+float lerp(float s, float e, float t) { return s + (e - s)*t; }
+float blerp(float c00, float c10, float c01, float c11, float tx, float ty) {
+	return lerp(lerp(c00, c10, tx), lerp(c01, c11, tx), ty);
+}
+
+void normalscale(int *src, int srcw, int srch, float *dst,  int dsw, int dsh, int fnum) {
+
+
+	float scalew = dsw / (float)srcw;
+	float scaleh = dsh / (float)srch;
+	int x, y;
+	//linear interpolation
+	if (1)
+	{
+		for (x = 0, y = 0; y < dsh; x++) {
+			if (x > dsw) {
+				x = 0; y++;
+			}
+			int gyi = (int)(y*scaleh);
+			int gxi = (int)(x* scalew);
+			dst[(y*dsw) + x] = src[srcw *gyi + gxi];
+		}
+	}
+	else
+	{
+		//Bilinear interpolation	
+		for (x = 0, y = 0; y < dsh; x++) {
+			if (x > dsw) {
+				x = 0; y++;
+			}
+			float gx = x / (float)(dsw) * (srcw - 1);
+			float gy = y / (float)(dsh) * (srch - 1);
+			int gxi = (int)gx;
+			int gyi = (int)gy;
+			uint32_t result = 0;
+			uint32_t c00 = getpixel(src, srcw, gxi, gyi);
+			uint32_t c10 = getpixel(src, srcw, gxi + 1, gyi);
+			uint32_t c01 = getpixel(src, srcw, gxi, gyi + 1);
+			uint32_t c11 = getpixel(src, srcw, gxi + 1, gyi + 1);
+			dst[(y*dsw) + x] = blerp(c00, c10, c01, c11, gx - gxi, gy - gyi);
+		}
+	}	
 }
 
 static void load(const char* fname, int gopidx, int framenum, int present, int acc)
@@ -1099,18 +985,63 @@ static void load(const char* fname, int gopidx, int framenum, int present, int a
 
 	uint8_t *bgr_arr = NULL;
 	uint8_t *final_bgr_arr = NULL;
-	uint8_t *mb_arr = NULL;
-	uint8_t *qp_arr = NULL;
-	uint8_t *mv_arr = NULL;
-	uint8_t *res_arr = NULL;
+	int *mb_arr = NULL;
+	int *qp_arr = NULL;
+	int *mv_arr = NULL;
+	int *res_arr = NULL;
+
+	sizeInfo szInfo = { 0, };
 
 	if (decode_videowithffmpeg(fname, gop_target, pos_target,
 		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr,
-		representation,
-		accumulate) < 0) {
+		representation, accumulate, &szInfo) < 0) {
+
 		printf("Decoding video failed.\n");
-		
 	}
+
+	//normalize buffer
+	if (szInfo.repeat > 0)
+	{
+		float* fnormal = NULL;
+		fnormal = (float*)malloc(NORMALW * NORMALH * sizeof(float));
+		memset(fnormal, 0x00, NORMALW * NORMALH * sizeof(float));
+
+		if (representation == GOTMB)
+			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
+		if (representation == GOTQP)
+			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
+		if (representation == GOTMV)
+			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, NORMALW, NORMALH, szInfo.repeat);
+		if (representation == GOTRD)
+			normalscale(res_arr, szInfo.w, szInfo.h, fnormal, NORMALW, NORMALH, szInfo.repeat);
+
+		if (representation == (GOTMB ^ GOTQP)) // 6
+		{
+			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, HALFNORMALH, szInfo.repeat);
+			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
+		}
+		if (representation == (GOTMV ^ GOTRD)) // 24
+		{
+			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, NORMALW, HALFNORMALH, szInfo.repeat);
+			normalscale(res_arr, szInfo.w, szInfo.h, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
+		}
+
+#ifdef Py_PYTHON_H
+		npy_intp dims[3];
+		dims[0] = NORMALH;
+		dims[1] = NORMALW;
+		dims[2] = 1;
+		PyArrayObject *final_arr = PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);
+
+		int size = h * w * 1 * sizeof(float);
+		memcpy(final_arr->data, fnormal, size);
+
+		if (fnormal != NULL) free(fnormal);
+
+		return final_arr;
+#endif
+	}
+	
 
 	if (bgr_arr != NULL) free(bgr_arr);
 	if (final_bgr_arr != NULL) free(final_bgr_arr);
@@ -1118,57 +1049,7 @@ static void load(const char* fname, int gopidx, int framenum, int present, int a
 	if (qp_arr != NULL) free(qp_arr);
 	if (mv_arr != NULL) free(mv_arr);
 	if (res_arr != NULL) free(res_arr);
-
-	/*
-	PyArrayObject *bgr_arr = NULL;
-	PyArrayObject *final_bgr_arr = NULL;
-	PyArrayObject *mv_arr = NULL;
-	PyArrayObject *res_arr = NULL;
-
-	if (decode_video(gop_target, pos_target,
-		&bgr_arr, &mv_arr, &res_arr,
-		representation,
-		accumulate) < 0) {
-		printf("Decoding video failed.\n");
-
-		Py_XDECREF(bgr_arr);
-		Py_XDECREF(mv_arr);
-		Py_XDECREF(res_arr);
-		return Py_None;
-	}
-	if (representation == MV) {
-		Py_XDECREF(bgr_arr);
-		Py_XDECREF(res_arr);
-		return mv_arr;
-
-	}
-	else if (representation == RESIDUAL) {
-		Py_XDECREF(bgr_arr);
-		Py_XDECREF(mv_arr);
-		return res_arr;
-
-	}
-	else {
-		Py_XDECREF(mv_arr);
-		Py_XDECREF(res_arr);
-
-		npy_intp *dims_bgr = PyArray_SHAPE(bgr_arr);
-		int h = dims_bgr[1];
-		int w = dims_bgr[2];
-
-		npy_intp dims[3];
-		dims[0] = h;
-		dims[1] = w;
-		dims[2] = 3;
-		PyArrayObject *final_bgr_arr = PyArray_ZEROS(3, dims, NPY_UINT8, 0);
-
-		int size = h * w * 3 * sizeof(uint8_t);
-		memcpy(final_bgr_arr->data, bgr_arr->data + size, size);
-
-		Py_XDECREF(bgr_arr);
-		return final_bgr_arr;
-	}
-	*/
+	
 }
 
 
