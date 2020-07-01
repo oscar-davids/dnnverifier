@@ -140,14 +140,14 @@ def get_features(video_data, frame_batch_size=8, device='cuda'):
     """
 
 	#output = torch.squeeze(output2)
-    return output2
+    return output
 
 if __name__ == "__main__":
     parser = ArgumentParser(description='"Extracting Content-Aware Perceptual Features using Pre-Trained ResNet-50')
     parser.add_argument("--seed", type=int, default=20200610)
     parser.add_argument('--database', default='KoNViD-1k', type=str,
                         help='database name (default: KoNViD-1k)')
-    parser.add_argument('--frame_batch_size', type=int, default=64,
+    parser.add_argument('--frame_batch_size', type=int, default=8,
                         help='frame batch size for feature extraction (default: 64)')
 
     parser.add_argument('--disable_gpu', action='store_true',
@@ -201,5 +201,5 @@ if __name__ == "__main__":
         str_output = '{:0>7}'.format(i)
 
         features = get_features(current_data, args.frame_batch_size, device)
-        np.save(features_dir + str_output + '_bitstreamfts', features.to('cpu').numpy())
+        np.save(features_dir + str_output + '_bitstreamfts', features)
         np.save(features_dir + str_output + '_score', current_score)

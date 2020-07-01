@@ -488,12 +488,12 @@ int decode_videowithffmpeg(
 
 	if (avformat_open_input(&fmt_ctx, fname, NULL, NULL) < 0) {
 		fprintf(stderr, "Could not open source file %s\n", fname);
-		exit(1);
+		return -1;
 	}
 
 	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
 		fprintf(stderr, "Could not find stream information\n");
-		exit(1);
+		return -1;
 	}
 
 	open_codec_context(fmt_ctx, AVMEDIA_TYPE_VIDEO);
@@ -832,6 +832,11 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		representation, accumulate, &szInfo) < 0) {
 
 		printf("Decoding video failed.\n");
+#ifdef _DEBUG
+		return ret;
+#else
+		return final_arr;
+#endif
 	}
 
 	//normalize buffer
@@ -878,13 +883,12 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		}
 
 #ifdef Py_PYTHON_H
-		npy_intp dims[3];
-		dims[0] = NORMALH;
-		dims[1] = NORMALW;
-		dims[2] = 1;
+		npy_intp dims[2];
+		dims[0] = NORMALH * NORMALW;
+		dims[1] = 1;		
 		final_arr = PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);
 
-		int size = NORMALH * NORMALW * 1 * sizeof(float);
+		int size = NORMALH * NORMALW  * sizeof(float);
 		memcpy(final_arr->data, fnormal, size);	
 		
 #endif
