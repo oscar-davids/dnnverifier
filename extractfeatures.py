@@ -14,6 +14,8 @@ import h5py
 import numpy as np
 import random
 from argparse import ArgumentParser
+import extractfts
+
 
 
 class VideoDataset(Dataset):
@@ -40,11 +42,15 @@ class VideoDataset(Dataset):
             video_data = skvideo.io.vread(os.path.join(self.videos_dir, video_name))
         video_score = self.score[idx]
 
+        video_path = os.path.join(self.videos_dir, video_name)
+
+        '''
         transform = transforms.Compose([
             transforms.ToTensor(),
             transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
         ])
 
+        
         video_length = video_data.shape[0]
         video_channel = video_data.shape[3]
         video_height = video_data.shape[1]
@@ -55,8 +61,10 @@ class VideoDataset(Dataset):
             frame = Image.fromarray(frame)
             frame = transform(frame)
             transformed_video[frame_idx] = frame
+        '''
 
-        sample = {'video': transformed_video,
+        sample = {'video': video_path,
+                  'length': video_data.shape[0],
                   'score': video_score}
 
         return sample
@@ -86,7 +94,7 @@ def global_std_pool2d(x):
                      dim=2, keepdim=True)
 
 
-def get_features(video_data, frame_batch_size=64, device='cuda'):
+def get_resnet50features(video_data, frame_batch_size=64, device='cuda'):
     """feature extraction"""
     extractor = ResNet50().to(device)
     video_length = video_data.shape[0]
@@ -112,6 +120,27 @@ def get_features(video_data, frame_batch_size=64, device='cuda'):
 
     return output
 
+def get_features(video_data, frame_batch_size=8, device='cuda'):
+    """feature extraction"""
+    current_video = video_data['video']
+    video_length = video_data['length']
+    frame_start = 0
+    frame_end = video_length - frame_batch_size * 2
+    output2 = torch.Tensor().to(device)
+
+    asaas = extractfts.get_num_gops(current_video)
+    output = extractfts.loadft(current_video, frame_start, frame_batch_size, 6)
+
+    """
+    with torch.no_grad():
+	    while frame_start < frame_end:
+            extractfts.loadft(current_video, frame_start, frame_batch_size, 6)
+            #output2 = torch.cat((output2, features_std), 0)
+	        frame_start = frame_start + 2
+    """
+
+	#output = torch.squeeze(output2)
+    return output2
 
 if __name__ == "__main__":
     parser = ArgumentParser(description='"Extracting Content-Aware Perceptual Features using Pre-Trained ResNet-50')
@@ -165,12 +194,12 @@ if __name__ == "__main__":
 
     for i in range(len(dataset)):
         current_data = dataset[i]
-        current_video = current_data['video']
+
         current_score = current_data['score']
-        print('Video id {}: length {}'.format(i, current_video.shape[0]))
+        print('Video id {}: length {}'.format(i, current_data['length']))
 
         str_output = '{:0>7}'.format(i)
 
-        features = get_features(current_video, args.frame_batch_size, device)
+        features = get_features(current_data, args.frame_batch_size, device)
         np.save(features_dir + str_output + '_bitstreamfts', features.to('cpu').numpy())
         np.save(features_dir + str_output + '_score', current_score)

@@ -18,6 +18,9 @@
     <ClCompile Include="extractfts.c">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="bmpio.c">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="extractfts.h">
@@ -45,6 +48,9 @@
       <Filter>Header Files</Filter>
     </ClInclude>
     <ClInclude Include="videodsp.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="bmpio.h">
       <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>

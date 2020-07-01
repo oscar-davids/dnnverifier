@@ -19,9 +19,11 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
+    <ClCompile Include="bmpio.c" />
     <ClCompile Include="extractfts.c" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="bmpio.h" />
     <ClInclude Include="extractfts.h" />
     <ClInclude Include="h264.h" />
     <ClInclude Include="h264chroma.h" />
