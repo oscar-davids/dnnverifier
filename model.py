@@ -22,10 +22,11 @@ class VQADataset(Dataset):
         self.length = np.zeros((len(index), 1))
         self.mos = np.zeros((len(index), 1))
         for i in range(len(index)):
-            features = np.load(features_dir + str(index[i]) + '_bitstreamfts.npy')
+            str_output = '{:0>7}'.format(index[i])
+            features = np.load(features_dir + str_output + '_bitstreamfts.npy')
             self.length[i] = features.shape[0]
             self.features[i, :features.shape[0], :] = features
-            self.mos[i] = np.load(features_dir + str(index[i]) + '_score.npy')  #
+            self.mos[i] = np.load(features_dir + str_output + '_score.npy')  #
         self.scale = scale  #
         self.label = self.mos / self.scale  # label normalization
 
@@ -67,7 +68,7 @@ def TP(q, tau=12, beta=0.5):
 class VQModel(nn.Module):
     def __init__(self, input_size=4096, reduced_size=128, hidden_size=32):
 
-        super(VSFA, self).__init__()
+        super(VQModel, self).__init__()
         self.hidden_size = hidden_size
         self.ann = ANN(input_size, reduced_size, 1)
         self.rnn = nn.GRU(reduced_size, hidden_size, batch_first=True)

@@ -30,10 +30,10 @@ if __name__ == "__main__":
     parser.add_argument('--epochs', type=int, default=2000,
                         help='number of epochs to train (default: 2000)')
 
-    parser.add_argument('--database', default='CVD2014', type=str,
-                        help='database name (default: CVD2014)')
-    parser.add_argument('--model', default='VSFA', type=str,
-                        help='model name (default: VSFA)')
+    parser.add_argument('--database', default='KoNViD-1k', type=str,
+                        help='database name (default: KoNViD-1k)')
+    parser.add_argument('--model', default='VQModel', type=str,
+                        help='model name (default: VQModel)')
     parser.add_argument('--exp_id', default=0, type=int,
                         help='exp id for train-val-test splits (default: 0)')
     parser.add_argument('--test_ratio', type=float, default=0.2,
@@ -116,7 +116,7 @@ if __name__ == "__main__":
         writer = SummaryWriter(log_dir='{}/EXP{}-{}-{}-{}-{}-{}-{}'
                                .format(args.log_dir, args.exp_id, args.database, args.model,
                                        args.lr, args.batch_size, args.epochs,
-                                       datetime.datetime.now().strftime("%I:%M%p on %B %d, %Y")))
+                                       datetime.datetime.now().strftime("%I%M%p%B%d%Y")))
 
     criterion = nn.L1Loss()  # L1 loss
     optimizer = Adam(model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
@@ -156,6 +156,8 @@ if __name__ == "__main__":
         val_SROCC = stats.spearmanr(y_pred, y_val)[0]
         val_RMSE = np.sqrt(((y_pred-y_val) ** 2).mean())
         val_KROCC = stats.stats.kendalltau(y_pred, y_val)[0]
+        print("Validate results: val loss={:.4f}, SROCC={:.4f}, KROCC={:.4f}, PLCC={:.4f}, RMSE={:.4f}"
+              .format(val_loss, val_SROCC, val_KROCC, val_PLCC, val_RMSE))
 
         # Test
         if args.test_ratio > 0 and not args.notest_during_training:
