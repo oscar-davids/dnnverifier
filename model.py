@@ -63,8 +63,27 @@ def TP(q, tau=12, beta=0.5):
     n = F.avg_pool1d(torch.cat((torch.exp(-q), torch.exp(-qp)), 2), tau, stride=1)
     m = m / n
     return beta * m + (1 - beta) * l
+"""
+class VQModel(nn.Module):
+    def __init__(self, input_size=4096, reduced_size=128, n_ANNlayers=7, dropout_p=0.5):
+
+        super(VQModel, self).__init__()
+        self.n_ANNlayers = n_ANNlayers
+        self.fc0 = nn.Linear(input_size, reduced_size)  #
+        self.dropout = nn.Dropout(p=dropout_p)
+        self.fc = nn.Linear(reduced_size, reduced_size)
+        self.fc3 = nn.Linear(reduced_size, 1) #
 
 
+    def forward(self, input):
+        input = self.fc0(input)  # linear
+        for i in range(self.n_ANNlayers - 1):  # nonlinear
+            input = self.fc(self.dropout(F.relu(input)))
+
+        out = self.fc3(input)
+        return out
+
+"""
 class VQModel(nn.Module):
     def __init__(self, input_size=4096, reduced_size=128, hidden_size=32):
 

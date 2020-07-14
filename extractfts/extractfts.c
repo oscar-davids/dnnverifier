@@ -101,7 +101,7 @@ static int open_codec_context(AVFormatContext *fmt_ctx, enum AVMediaType type)
 }
 
 
-void count_frames(int* gop_count, int* frame_count) {
+void backcount_frames(int* gop_count, int* frame_count) {
 
 	AVCodec *pCodec;
 	AVCodecContext *pCodecCtx = NULL;
@@ -191,15 +191,16 @@ void count_frames(int* gop_count, int* frame_count) {
 	return 0;
 }
 
-int lpms_getvideoinfo(int* gop_count, int* frame_count)
+int count_frames(int* gop_count, int* frame_count)
 {
 	
 	if (filename == NULL) return -1;
 	AVFormatContext 	*ic = NULL;
-	AVCodec 			    *decoder = NULL;
+	AVCodec 			*decoder = NULL;
 	AVCodecContext 		*dx = NULL;
-	AVStream          *video = NULL;
-	int 				      ret, video_stream;
+	AVStream			*video = NULL;
+	int 				ret, video_stream;
+	AVPacket			pkt = { 0 };
 	ret = -1;
 
 	*gop_count = 0;
@@ -231,7 +232,50 @@ int lpms_getvideoinfo(int* gop_count, int* frame_count)
 		fprintf(stderr, "Failed to open codec for stream #%u\n", video_stream);
 		return -1;
 	}
+	frame = av_frame_alloc();
+	if (!frame) {
+		fprintf(stderr, "Could not allocate frame\n");
+		ret = AVERROR(ENOMEM);
+		return -1;
+	}
 
+	int cur_gop = -1;
+	int cur_pos = 0;
+
+	while (av_read_frame(ic, &pkt) >= 0) {
+
+		if (pkt.stream_index == video_stream)
+		{
+			//ret = decode_packet(&pkt);
+			ret = avcodec_send_packet(dx, &pkt);
+			if (ret < 0) {
+				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				return ret;
+			}
+
+			while (ret >= 0) {
+				ret = avcodec_receive_frame(dx, frame);
+				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+					ret = 0;
+					break;
+				}
+				else if (ret < 0) {
+					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+					return ret;
+				}
+				if (frame->pict_type == AV_PICTURE_TYPE_I) {
+					++cur_gop;
+				}
+				cur_pos++;
+				av_frame_unref(frame);
+			}
+		}
+	}
+
+	*gop_count = cur_gop + 1;
+	*frame_count = cur_pos;
+	
+	/*
 	float vinfofps = 1.0;
 	if (video->r_frame_rate.den > 0.0) {
 		vinfofps = av_q2d(video->r_frame_rate);
@@ -252,9 +296,11 @@ int lpms_getvideoinfo(int* gop_count, int* frame_count)
 	if (vinfoframecount == 0) {
 		vinfoframecount = (int)(vinfoduration * vinfofps + 0.5);
 	}
+	*/
 
 	avcodec_free_context(&dx);
 	avformat_close_input(&ic);
+	av_frame_free(&frame);
 
 	return 0;
 }
@@ -389,7 +435,7 @@ void create_and_load_mv_residual(
 			uint8_t *bgr_data = (uint8_t*)bgr_arr;
 			int32_t *res_data = (int32_t*)res_arr;
 
-			int stride_0 = height * width * 3;
+			int stride_0 = height * width;
 			int stride_1 = width * 3;
 			int stride_2 = 3;
 
@@ -410,12 +456,13 @@ void create_and_load_mv_residual(
 					}
 					location_src = src_y * stride_1 + src_x * stride_2;
 
-					location = y * stride_1 + x * stride_2;
-					for (c = 0; c < 3; ++c) {
-						location2 = stride_0 + location;
-						res_data[location] = (int32_t)bgr_data[location2]
+					//location = y * stride_1 + x * stride_2;
+					location = y * width + x; //gray scale
+					location2 = y * stride_1 + x * stride_2;
+					for (c = 0; c < 3; ++c) {						
+						res_data[location] += (int32_t)bgr_data[location2 + c]
 							- (int32_t)bgr_data[location_src + c];
-						location += 1;
+						//location += 1;
 					}
 				}
 			}
@@ -483,6 +530,7 @@ int decode_videowithffmpeg(
 	AVFrame *pFrameBGR = NULL;
 	int *accu_src = NULL;
 	int *accu_src_old = NULL;
+	int nsuccess = 0;
 
 	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
 
@@ -512,16 +560,23 @@ int decode_videowithffmpeg(
 		goto end;
 	}
 
+	pFrameBGR = av_frame_alloc();
+	if (!pFrameBGR) {
+		fprintf(stderr, "Could not allocate frame\n");
+		ret = AVERROR(ENOMEM);
+		goto end;
+	}
+
 	printf("framenum,source,blockw,blockh,srcx,srcy,dstx,dsty,flags\n");
 	int cur_gop = -1;
 
 	/* read frames from the file */
-	while (av_read_frame(fmt_ctx, &pkt) >= 0 && cur_pos < pos_target) {
+	while (av_read_frame(fmt_ctx, &pkt) >= 0 && cur_pos <= pos_target) {
 
 		if (pkt.stream_index == video_stream_idx)
 		{
 			//ret = decode_packet(&pkt);
-			 ret = avcodec_send_packet(video_dec_ctx, &pkt);
+			ret = avcodec_send_packet(video_dec_ctx, &pkt);
 			if (ret < 0) {
 				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
 				return ret;
@@ -541,7 +596,7 @@ int decode_videowithffmpeg(
 					++cur_gop;
 				}
 
-				if (cur_gop == gop_target && cur_pos <= pos_target)
+				if (/*cur_gop == gop_target &&*/ cur_pos <= pos_target)
 				{
 					if (ret >= 0) {
 						int i;
@@ -551,11 +606,7 @@ int decode_videowithffmpeg(
 						int h = frame->height;
 						int w = frame->width;
 
-						// Initialize arrays. 
-						if ((representation & GOTFM) && !(*bgr_arr)) { // get rgb
-							*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
-							memset(*bgr_arr, 0x00, w * h * 3 * sizeof(uint8_t));
-						}
+						
 						if ((representation & GOTMB) && !(*mb_arr)) { // get macroblock
 							*mb_arr = malloc(w * h * sizeof(int));
 							memset(*mb_arr, 0x00, w * h * sizeof(int));
@@ -592,11 +643,19 @@ int decode_videowithffmpeg(
 							}
 							memcpy(accu_src, accu_src_old, h * w * 2 * sizeof(int));
 						}
+						// Initialize arrays. 
+						if (((representation & GOTFM) || (representation & GOTRD)) && !(*bgr_arr)) { // get rgb
+							*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
+							memset(*bgr_arr, 0x00, w * h * 3 * sizeof(uint8_t));
+						}
 
 						szInfo->w = w;
 						szInfo->h = h;
 
 						hcontext = (H264Context*)video_dec_ctx->priv_data;
+#ifdef CALA_NOREF_PPSNR
+						H264SliceContext* slice =  hcontext->slice_ctx;
+#endif
 
 						//get macroblock
 						if (hcontext && (representation & GOTMB)) {
@@ -659,6 +718,7 @@ int decode_videowithffmpeg(
 
 								szInfo->mw = hcontext->mb_width;
 								szInfo->mh = hcontext->mb_height;
+								nsuccess = 1;
 							}
 						}
 						//get QP table
@@ -679,19 +739,21 @@ int decode_videowithffmpeg(
 
 							szInfo->mw = hcontext->mb_width;
 							szInfo->mh = hcontext->mb_height;
+
+							nsuccess = 1;
 						}
 
-						if ((cur_pos == 0 && accumulate  && representation == GOTRD) 
+
+						if (cur_pos == pos_target && representation == GOTRD
 							/*|| (cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) || cur_pos == pos_target*/) 
 						{
 							create_and_load_bgr(frame, pFrameBGR, NULL, bgr_arr, cur_pos, pos_target);
 						}
-						if (representation == GOTMV ||
-							representation == GOTRD) {
+						if ((representation & GOTMV) || (representation & GOTRD)) {
 							AVFrameSideData *sd;
 							sd = av_frame_get_side_data(frame, AV_FRAME_DATA_MOTION_VECTORS);
 							if (sd) {
-								if (accumulate || cur_pos == pos_target) {
+								if (accumulate && cur_pos == pos_target) {
 									create_and_load_mv_residual(
 										sd,
 										*bgr_arr, *mv_arr, *res_arr,
@@ -704,10 +766,11 @@ int decode_videowithffmpeg(
 										h,
 										pos_target);
 								}
+								nsuccess = 1;
 							}
 						}
+						
 						cur_pos++;
-
 						av_frame_unref(frame);
 					}
 				}
@@ -720,7 +783,7 @@ int decode_videowithffmpeg(
 			break;
 	}
 
-	szInfo->repeat = cur_pos;
+	szInfo->repeat = nsuccess;
 
 	/* flush cached frames */
 	//decode_packet(NULL);
@@ -808,6 +871,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	int gop_target, pos_target, representation, accumulate;
 
 #ifdef _DEBUG
+	char sname[MAX_PATH] = { 0, };
 	filename = fname;
 	gop_target = gopidx;
 	pos_target = framenum;
@@ -842,21 +906,40 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	//normalize buffer
 	if (szInfo.repeat > 0)
 	{
+#ifdef _DEBUG
+		switch (representation)
+		{
+		case GOTMB:
+			sprintf(sname, "D:/debugmb_%03d.bmp", framenum);
+			break;
+		case GOTQP:
+			sprintf(sname, "D:/debugqp_%03d.bmp", framenum);
+			break;
+		case GOTMV:
+			sprintf(sname, "D:/debugmv_%03d.bmp", framenum);
+			break;
+		case GOTRD:
+			sprintf(sname, "D:/debugrd_%03d.bmp", framenum);
+			break;
+		case GOTMB ^ GOTQP:
+			sprintf(sname, "D:/debugmbqp_%03d.bmp", framenum);
+			break;
+		case GOTMV ^ GOTRD:
+			sprintf(sname, "D:/debugmvrd_%03d.bmp", framenum);
+			break;
+		default:
+			break;
+		}
+#endif
 		float* fnormal = NULL;
 		fnormal = (float*)malloc(NORMALW * NORMALH * sizeof(float));
 		memset(fnormal, 0x00, NORMALW * NORMALH * sizeof(float));
 
 		if (representation == GOTMB) {
 			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
-#ifdef _DEBUG
-			WriteFloatBmp("D:/debugmb.bmp", NORMALW, NORMALH, fnormal);
-#endif
 		}
 		if (representation == GOTQP) {
 			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
-#ifdef _DEBUG
-			WriteFloatBmp("D:/debugqp.bmp", NORMALW, NORMALH, fnormal);
-#endif
 		}
 		if (representation == GOTMV) {
 			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, NORMALW, NORMALH, szInfo.repeat);
@@ -869,18 +952,16 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		{
 			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, HALFNORMALH, szInfo.repeat);
 			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
-#ifdef _DEBUG
-			WriteFloatBmp("D:/debugmbqp.bmp", NORMALW, NORMALH, fnormal);
-#endif
 		}
 		if (representation == (GOTMV ^ GOTRD)) // 24
 		{
 			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, NORMALW, HALFNORMALH, szInfo.repeat);
 			normalscale(res_arr, szInfo.w, szInfo.h, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
-#ifdef _DEBUG
-			WriteFloatBmp("D:/debugmvrd.bmp", NORMALW, NORMALH, fnormal);
-#endif
 		}
+
+#ifdef _DEBUG
+		WriteFloatBmp(sname, NORMALW, NORMALH, fnormal);
+#endif
 
 #ifdef Py_PYTHON_H
 		npy_intp dims[2];
@@ -923,8 +1004,22 @@ int main(int argc, char **argv)
     }
     src_filename = argv[1];
 
-#ifdef _DEBUG	
-	loadft(src_filename, 0, 8, 6);
+#ifdef _DEBUG
+	
+	int gop_count, frame_count;
+	filename = src_filename;
+
+	count_frames(&gop_count, &frame_count);
+
+	printf("%s gopnum = %d frame = %d .\n", gop_count, frame_count);
+
+	//loadft(src_filename, 0, 8, 6);
+	for (size_t i = 1; i < 240; i++)
+	{
+		loadft(src_filename, 0, i, 16);
+	}
+
+	
 #else
 
 #endif

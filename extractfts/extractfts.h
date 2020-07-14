@@ -24,6 +24,8 @@ typedef struct ThreadFrame {
 } ThreadFrame;
 
 
+#define CALA_NOREF_PPSNR		1
+
 #define H264_MAX_PICTURE_COUNT 36
 
 #define MAX_MMCO_COUNT         66

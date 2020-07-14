@@ -124,22 +124,25 @@ def get_features(video_data, frame_batch_size=8, device='cuda'):
     """feature extraction"""
     current_video = video_data['video']
     video_length = video_data['length']
-    frame_start = 0
+    frame_start = 3
     frame_end = video_length - frame_batch_size * 2
-    output2 = torch.Tensor().to(device)
+    #output = torch.Tensor().to(device)
 
-    asaas = extractfts.get_num_gops(current_video)
-    output = extractfts.loadft(current_video, frame_start, frame_batch_size, 6)
+    ngops = extractfts.get_num_gops(current_video)
+    nframecount = extractfts.get_num_frames(current_video)
+    #output = extractfts.loadft(current_video, frame_start, frame_batch_size, 6)
+    output = []
 
-    """
-    with torch.no_grad():
-	    while frame_start < frame_end:
-            extractfts.loadft(current_video, frame_start, frame_batch_size, 6)
-            #output2 = torch.cat((output2, features_std), 0)
-	        frame_start = frame_start + 2
-    """
+    while frame_start < nframecount - 2:
 
-	#output = torch.squeeze(output2)
+        features = extractfts.loadft(current_video, 0, frame_start, 16)
+        if len(features) > 0:
+            output.append(features)
+        frame_start = frame_start + 1
+
+
+	#output = torch.squeeze(output)
+
     return output
 
 if __name__ == "__main__":
@@ -163,9 +166,9 @@ if __name__ == "__main__":
     torch.utils.backcompat.broadcast_warning.enabled = True
 
     if args.database == 'KoNViD-1k':
-        videos_dir = 'D:/30_TrainData/VQdata/KoNViD-1k/vdata/'    # videos dir
-        features_dir = 'traindata/KoNViD-1k_features/'      # features dir
-        datainfo = 'dataset/KoNViD-1kinfo.mat'              # database info: video_names, scores; video format, width, height, index, ref_ids, max_len, etc.
+        videos_dir = 'D:/30_TrainData/VQdata/KoNViD-1k/vdata/'      # videos dir
+        features_dir = 'traindata/KoNViD-1k_features/'              # features dir
+        datainfo = 'dataset/KoNViD-1kinfo.mat'                      # database info: video_names, scores; video format, width, height, index, ref_ids, max_len, etc.
     if args.database == 'CVD2014':
         videos_dir = 'D:/30_TrainData/VQdata/CVD2014/vdata/'
         features_dir = 'traindata/CVD2014_features/'
@@ -193,6 +196,7 @@ if __name__ == "__main__":
     dataset = VideoDataset(videos_dir, video_names, scores, video_format, width, height)
 
     for i in range(len(dataset)):
+
         current_data = dataset[i]
 
         current_score = current_data['score']
