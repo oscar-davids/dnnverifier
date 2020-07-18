@@ -546,18 +546,18 @@ int calc_bitrate_qpi(float *fbitrate, float* fqp1)
 				if (frame->pict_type == AV_PICTURE_TYPE_I) {
 					++cur_gop;
 
-					AVFrameSideData *sd;
-					H264Context *hcontext;
+					AVFrameSideData *sd = 0;
+					H264Context *hcontext = 0;
+					H264Picture *pic = 0;
 					hcontext = (H264Context*)dx->priv_data;
-					H264Picture *pic = hcontext->next_output_pic;
+					if(hcontext)
+						pic = hcontext->next_output_pic;
 
-					if (ret >= 0 && hcontext->mb_width * hcontext->mb_height > 0) {
+					if (ret >= 0 && hcontext && hcontext->mb_width * hcontext->mb_height > 0) {
 						int i;
-
 
 						int h = frame->height;
 						int w = frame->width;
-
 
 						int nsum = 0;
 
@@ -1228,8 +1228,7 @@ int main(int argc, char **argv)
     }
     src_filename = argv[1];
 
-#ifdef _DEBUG
-	
+
 	int gop_count, frame_count;
 	filename = src_filename;
 
@@ -1255,14 +1254,9 @@ int main(int argc, char **argv)
 	}
 	*/
 
-	
-#else
-
-#endif
-
 	return 0;
 }
-#else
+#endif
 
 static PyObject *get_num_gops(PyObject *self, PyObject *args)
 {
@@ -1328,6 +1322,7 @@ static PyMethodDef FeatureMethods[] = {
 	{NULL, NULL, 0, NULL}        /* Sentinel */
 };
 
+#if PY_MAJOR_VERSION >= 3
 
 static struct PyModuleDef extractfts = {
 	PyModuleDef_HEAD_INIT,
@@ -1337,13 +1332,17 @@ static struct PyModuleDef extractfts = {
 				 or -1 if the module keeps state in global variables. */
 	FeatureMethods
 };
-
+#endif
 
 PyMODINIT_FUNC PyInit_extractfts(void)
 {
 	PyObject *m;
 
+#if PY_MAJOR_VERSION >= 3
 	m = PyModule_Create(&extractfts);
+#else
+	m = Py_InitModule3("extractfts", FeatureMethods, NULL);
+#endif
 	if (m == NULL)
 		return NULL;
 
@@ -1356,6 +1355,7 @@ PyMODINIT_FUNC PyInit_extractfts(void)
 	return m;
 }
 
+#if PY_MAJOR_VERSION >= 3
 
 int main(int argc, char *argv[])
 {
@@ -1380,4 +1380,28 @@ int main(int argc, char *argv[])
 	return 0;
 }
 
+#else
+
+
+#define INITERROR return
+struct module_state {
+    PyObject *error;
+};
+static struct module_state _state;
+
+void initextractfts(void)
+{
+    PyObject *module = Py_InitModule("extractfts", FeatureMethods);
+
+    if (module == NULL)
+        INITERROR;
+
+    struct module_state *st = &_state;
+
+    st->error = PyErr_NewException("extractfts.Error", NULL, NULL);
+    if (st->error == NULL) {
+        Py_DECREF(module);
+        INITERROR;
+    }
+}
 #endif

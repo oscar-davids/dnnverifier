@@ -14,14 +14,13 @@ def calc_norefpsnr(videopath):
     if os.path.isfile(videopath) == False:
         return psnr
 
+
     fbitrate = extractfts.get_bitrate(videopath)
     fqp1 = extractfts.get_qpi(videopath)
 
-    psnr = extractfts.get_psnr(videopath)
+    #psnr = extractfts.get_psnr(videopath)
+    psnr = 74.791 - 2.215 * math.log10(fbitrate) - 0.975 * fqp1 + 0.00001708 * fbitrate * fqp1
 
-    #PSNR = b 1 +b 2 ·log(rate)+b 3 ·QP I +b 4 ·rate·QP I
-    #74.791 -2.215 -0.975 1.708 · 10 −5
-    #psnr = 74.791 - 2.215 * math.log10(fbitrate) - 0.975 * fqp1 + 0.00001708 * fbitrate * fqp1
     return psnr
 
 def main():
@@ -57,6 +56,7 @@ def main():
     wr.writerow([0, 'filepath', 'psnr'])
 
     for i in range(0, len(filelist)):
+        print(filelist[i])
         psnr = calc_norefpsnr(filelist[i])
         print(psnr)
         wr.writerow([i + 1, filelist[i], psnr])
