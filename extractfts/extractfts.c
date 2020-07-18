@@ -470,7 +470,7 @@ void create_and_load_mv_residual(
 	}
 }
 
-int calc_bitrate_qp1(float *fbitrate, float* fqp1)
+int calc_bitrate_qpi(float *fbitrate, float* fqp1)
 {
 	if (filename == NULL) return -1;
 	AVFormatContext 	*ic = NULL;
@@ -1164,7 +1164,7 @@ static float getbitrate(const char* fname)
 	return fbitrate;
 }
 
-static float getqp1(const char* fname)
+static float getqpi(const char* fname)
 {
 	int ret = -1;
 	if (fname == 0) return 0.0;
@@ -1174,15 +1174,15 @@ static float getqp1(const char* fname)
 	bitrate = 0.0;
 	qp1 = 0.0;
 
-	calc_bitrate_qp1(&bitrate, &qp1);
+	calc_bitrate_qpi(&bitrate, &qp1);
 
 	return qp1;
 }
 
 #ifdef _DEBUG
-static int get_bitrate_qp1(const char* fname)
+static int get_bitrate_qpi(const char* fname)
 #else
-static PyObject *get_bitrate_qp1(PyObject *self, PyObject *args)
+static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 #endif
 {
 
@@ -1199,7 +1199,7 @@ static PyObject *get_bitrate_qp1(PyObject *self, PyObject *args)
 	bitrate = 0.0;
 	qp1 = 0.0;
 
-	calc_bitrate_qp1(&bitrate, &qp1);
+	calc_bitrate_qpi(&bitrate, &qp1);
 	
 #ifdef Py_PYTHON_H
 	npy_intp dims = 2;
@@ -1233,13 +1233,15 @@ int main(int argc, char **argv)
 	int gop_count, frame_count;
 	filename = src_filename;
 
-	float bitrate, qp1;
+	float bitrate, qpi;
 
-	//calc_bitrate_qp1(&bitrate, &qp1);
+	//calc_bitrate_qpi(&bitrate, &qp1);
 	bitrate = getbitrate(src_filename);
-	qp1 = getqp1(src_filename);
+	qpi = getqpi(src_filename);
 
-	printf("bitrate = %lf qp1 = %lf .\n", bitrate, qp1);
+	float fpsnr = 74.791 - 2.215 * log10(bitrate) - 0.975 * qpi + 0.00001708 * bitrate * qpi;
+
+	printf("bitrate = %lf qp1 = %lf psnr = %lf.\n", bitrate, qpi, fpsnr);
 
 	count_frames(&gop_count, &frame_count);
 
@@ -1291,21 +1293,36 @@ static PyObject *get_bitrate(PyObject *self, PyObject *args)
 }
 
 
-static PyObject *get_qp1(PyObject *self, PyObject *args)
+static PyObject *get_qpi(PyObject *self, PyObject *args)
 {
 	if (!PyArg_ParseTuple(args, "s", &filename)) return NULL;
 
 	float fqpi = 0.0;
-	fqpi = getqp1(filename);
+	fqpi = getqpi(filename);
 	return Py_BuildValue("f", fqpi);
+}
+static PyObject *get_psnr(PyObject *self, PyObject *args)
+{
+	if (!PyArg_ParseTuple(args, "s", &filename)) return NULL;
+
+	float bitrate, qpi, fpsnr;
+	bitrate = 0.0;
+	qpi = 0.0;
+
+	calc_bitrate_qpi(&bitrate, &qpi);
+
+	fpsnr = 74.791 - 2.215 * log10(bitrate) - 0.975 * qpi + 0.00001708 * bitrate * qpi;
+
+	return Py_BuildValue("f", fpsnr);
 }
 
 
 static PyMethodDef FeatureMethods[] = {
 	{"loadft",  loadft, METH_VARARGS, "Load a frames feature."},
-	{"get_bitrate",  get_bitrate, METH_VARARGS, "Getting bitrate in a video.."},
-	{"get_qp1",  get_qp1, METH_VARARGS, "Getting qpI in a video.."},
-	{"get_bitrate_qp1",  get_bitrate_qp1, METH_VARARGS, "Getting bitrate and qp1 in a video.."},	
+	{"get_bitrate",  get_bitrate, METH_VARARGS, "Getting bitrate of a video.."},
+	{"get_qpi",  get_qpi, METH_VARARGS, "Getting qpI of a video.."},
+	{"get_bitrate_qpi",  get_bitrate_qpi, METH_VARARGS, "Getting bitrate and qp1 of a video.."},
+	{"get_psnr",  get_psnr, METH_VARARGS, "Getting psnr of a video.."},
 	{"get_num_gops",  get_num_gops, METH_VARARGS, "Getting number of GOPs in a video."},
 	{"get_num_frames",  get_num_frames, METH_VARARGS, "Getting number of frames in a video."},
 	{NULL, NULL, 0, NULL}        /* Sentinel */
