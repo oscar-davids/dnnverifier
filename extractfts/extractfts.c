@@ -470,6 +470,130 @@ void create_and_load_mv_residual(
 	}
 }
 
+int calc_bitrate_qp1(float *fbitrate, float* fqp1)
+{
+	if (filename == NULL) return -1;
+	AVFormatContext 	*ic = NULL;
+	AVCodec 			*decoder = NULL;
+	AVCodecContext 		*dx = NULL;
+	AVStream			*video = NULL;
+	int 				ret, video_stream;
+	AVPacket			pkt = { 0 };
+	ret = -1;
+
+	*fbitrate = 0.0;
+	*fqp1 = 0.0;
+
+	if (avformat_open_input(&ic, filename, NULL, NULL) != 0) {
+		fprintf(stderr, "Cannot open input file '%s'\n", filename);
+		return ret;
+	}
+
+	if (avformat_find_stream_info(ic, NULL) < 0) {
+		fprintf(stderr, "Cannot find input stream information.\n");
+		return ret;
+	}
+
+	/* find the video stream information */
+	ret = av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
+	if (ret < 0) {
+		fprintf(stderr, "Cannot find a video stream in the input file\n");
+		return ret;
+	}
+
+	video_stream = ret;
+	video = ic->streams[video_stream];
+
+	if (!(dx = avcodec_alloc_context3(decoder))) return AVERROR(ENOMEM);
+	if (avcodec_parameters_to_context(dx, video->codecpar) < 0) return ret;
+
+	if ((ret = avcodec_open2(dx, decoder, NULL)) < 0) {
+		fprintf(stderr, "Failed to open codec for stream #%u\n", video_stream);
+		return -1;
+	}
+	frame = av_frame_alloc();
+	if (!frame) {
+		fprintf(stderr, "Could not allocate frame\n");
+		ret = AVERROR(ENOMEM);
+		return -1;
+	}
+
+
+	int cur_gop = -1;
+	int cur_pos = 0;
+
+	while (av_read_frame(ic, &pkt) >= 0) {
+
+		if (pkt.stream_index == video_stream)
+		{
+			//ret = decode_packet(&pkt);
+			ret = avcodec_send_packet(dx, &pkt);
+			if (ret < 0) {
+				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				return ret;
+			}
+
+			while (ret >= 0) {
+				ret = avcodec_receive_frame(dx, frame);
+				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+					ret = 0;
+					break;
+				}
+				else if (ret < 0) {
+					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+					return ret;
+				}
+				if (frame->pict_type == AV_PICTURE_TYPE_I) {
+					++cur_gop;
+
+					AVFrameSideData *sd;
+					H264Context *hcontext;
+					hcontext = (H264Context*)dx->priv_data;
+					H264Picture *pic = hcontext->next_output_pic;
+
+					if (ret >= 0 && hcontext->mb_width * hcontext->mb_height > 0) {
+						int i;
+
+
+						int h = frame->height;
+						int w = frame->width;
+
+
+						int nsum = 0;
+
+						if (pic && pic->qscale_table)
+						{
+							for (int j = 0; j < hcontext->mb_height; j++) {
+								int8_t* prow = pic->qscale_table + j * hcontext->mb_stride;
+
+								for (int i = 0; i < hcontext->mb_width; i++) {
+									nsum += prow[i];
+								}
+							}
+						}
+
+						*fqp1 = (float)nsum / (float)(hcontext->mb_width * hcontext->mb_height);
+						break;
+					}
+				}
+
+				cur_pos++;
+				av_frame_unref(frame);
+			}
+
+			if (*fqp1 > 0.0) break;
+		}
+	}
+
+	*fbitrate = dx->bit_rate / (float)1000.0;
+
+
+	avcodec_free_context(&dx);
+	avformat_close_input(&ic);
+	av_frame_free(&frame);
+
+	return 0;
+}
 static int decode_packet(const AVPacket *pkt)
 {
 	int ret = avcodec_send_packet(video_dec_ctx, pkt);
@@ -566,8 +690,7 @@ int decode_videowithffmpeg(
 		ret = AVERROR(ENOMEM);
 		goto end;
 	}
-
-	printf("framenum,source,blockw,blockh,srcx,srcy,dstx,dsty,flags\n");
+		
 	int cur_gop = -1;
 
 	/* read frames from the file */
@@ -991,6 +1114,107 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 #endif	
 }
 
+static float getbitrate(const char* fname)
+{
+	
+	if (fname == 0) return 0.0;
+	filename = fname;
+
+	if (filename == NULL) return -1;
+	AVFormatContext 	*ic = NULL;
+	AVCodec 			*decoder = NULL;
+	AVCodecContext 		*dx = NULL;
+	AVStream			*video = NULL;
+	int 				ret, video_stream;	
+	ret = -1;
+
+	if (avformat_open_input(&ic, filename, NULL, NULL) != 0) {
+		fprintf(stderr, "Cannot open input file '%s'\n", filename);
+		return ret;
+	}
+
+	if (avformat_find_stream_info(ic, NULL) < 0) {
+		fprintf(stderr, "Cannot find input stream information.\n");
+		return ret;
+	}
+
+	/* find the video stream information */
+	ret = av_find_best_stream(ic, AVMEDIA_TYPE_VIDEO, -1, -1, &decoder, 0);
+	if (ret < 0) {
+		fprintf(stderr, "Cannot find a video stream in the input file\n");
+		return ret;
+	}
+
+	video_stream = ret;
+	video = ic->streams[video_stream];
+
+	if (!(dx = avcodec_alloc_context3(decoder))) return AVERROR(ENOMEM);
+	if (avcodec_parameters_to_context(dx, video->codecpar) < 0) return ret;
+
+	if ((ret = avcodec_open2(dx, decoder, NULL)) < 0) {
+		fprintf(stderr, "Failed to open codec for stream #%u\n", video_stream);
+		return -1;
+	}
+
+	float fbitrate = dx->bit_rate / (float)1000.0;
+
+	avcodec_free_context(&dx);
+	avformat_close_input(&ic);	
+
+	return fbitrate;
+}
+
+static float getqp1(const char* fname)
+{
+	int ret = -1;
+	if (fname == 0) return 0.0;
+	filename = fname;
+
+	float bitrate, qp1;
+	bitrate = 0.0;
+	qp1 = 0.0;
+
+	calc_bitrate_qp1(&bitrate, &qp1);
+
+	return qp1;
+}
+
+#ifdef _DEBUG
+static int get_bitrate_qp1(const char* fname)
+#else
+static PyObject *get_bitrate_qp1(PyObject *self, PyObject *args)
+#endif
+{
+
+#ifdef _DEBUG
+	int ret = -1;
+	if (fname == 0) return ret;
+	filename = fname;
+#else
+	PyArrayObject *final_arr = NULL;
+	if (!PyArg_ParseTuple(args, "s", &filename)) return NULL;
+#endif
+
+	float bitrate, qp1;
+	bitrate = 0.0;
+	qp1 = 0.0;
+
+	calc_bitrate_qp1(&bitrate, &qp1);
+	
+#ifdef Py_PYTHON_H
+	npy_intp dims = 2;
+	final_arr = PyArray_ZEROS(1, &dims, PyArray_FLOAT, 0);
+	final_arr->data[0] = bitrate;
+	final_arr->data[1] = qp1;
+#endif
+
+#ifdef _DEBUG
+	ret = 0;
+	return ret;
+#else
+	return final_arr;
+#endif
+}
 
 #ifdef _DEBUG	
 int main(int argc, char **argv)
@@ -1009,15 +1233,25 @@ int main(int argc, char **argv)
 	int gop_count, frame_count;
 	filename = src_filename;
 
+	float bitrate, qp1;
+
+	//calc_bitrate_qp1(&bitrate, &qp1);
+	bitrate = getbitrate(src_filename);
+	qp1 = getqp1(src_filename);
+
+	printf("bitrate = %lf qp1 = %lf .\n", bitrate, qp1);
+
 	count_frames(&gop_count, &frame_count);
 
-	printf("%s gopnum = %d frame = %d .\n", gop_count, frame_count);
+	printf("gopnum = %d frame = %d .\n", gop_count, frame_count);
 
 	//loadft(src_filename, 0, 8, 6);
+	/*
 	for (size_t i = 1; i < 240; i++)
 	{
 		loadft(src_filename, 0, i, 16);
 	}
+	*/
 
 	
 #else
@@ -1047,9 +1281,31 @@ static PyObject *get_num_frames(PyObject *self, PyObject *args)
 	return Py_BuildValue("i", frame_count);
 }
 
+static PyObject *get_bitrate(PyObject *self, PyObject *args)
+{
+	if (!PyArg_ParseTuple(args, "s", &filename)) return NULL;
+
+	float fbitrate = 0.0;
+	fbitrate = getbitrate(filename);	
+	return Py_BuildValue("f", fbitrate);
+}
+
+
+static PyObject *get_qp1(PyObject *self, PyObject *args)
+{
+	if (!PyArg_ParseTuple(args, "s", &filename)) return NULL;
+
+	float fqpi = 0.0;
+	fqpi = getqp1(filename);
+	return Py_BuildValue("f", fqpi);
+}
+
 
 static PyMethodDef FeatureMethods[] = {
 	{"loadft",  loadft, METH_VARARGS, "Load a frames feature."},
+	{"get_bitrate",  get_bitrate, METH_VARARGS, "Getting bitrate in a video.."},
+	{"get_qp1",  get_qp1, METH_VARARGS, "Getting qpI in a video.."},
+	{"get_bitrate_qp1",  get_bitrate_qp1, METH_VARARGS, "Getting bitrate and qp1 in a video.."},	
 	{"get_num_gops",  get_num_gops, METH_VARARGS, "Getting number of GOPs in a video."},
 	{"get_num_frames",  get_num_frames, METH_VARARGS, "Getting number of frames in a video."},
 	{NULL, NULL, 0, NULL}        /* Sentinel */
