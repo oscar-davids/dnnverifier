@@ -10,7 +10,9 @@
 #include <libavcodec/avcodec.h>
 #include "extractfts.h"
 
-#ifndef _DEBUG
+//#define _TEST_MODULE
+
+#ifndef _TEST_MODULE
 #include <Python.h>
 #include "numpy/arrayobject.h"
 #endif
@@ -49,7 +51,7 @@ static AVFrame *frame = NULL;
 static int video_frame_count = 0;
 
 static const char *filename = NULL;
-#ifndef _DEBUG
+#ifndef _TEST_MODULE
 static PyObject *FeatureError;
 #endif
 
@@ -979,11 +981,11 @@ void normalscale(int *src, int srcw, int srch, float *dst,  int dsw, int dsh, in
 	}	
 }
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 #include "bmpio.h"
 #endif // DEBUG
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 static int loadft(const char* fname, int gopidx, int framenum, int present)
 #else
 static PyObject *loadft(PyObject *self, PyObject *args)
@@ -993,7 +995,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	int ret = -1;
 	int gop_target, pos_target, representation, accumulate;
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 	char sname[MAX_PATH] = { 0, };
 	filename = fname;
 	gop_target = gopidx;
@@ -1019,7 +1021,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		representation, accumulate, &szInfo) < 0) {
 
 		printf("Decoding video failed.\n");
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 		return ret;
 #else
 		return final_arr;
@@ -1029,7 +1031,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	//normalize buffer
 	if (szInfo.repeat > 0)
 	{
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 		switch (representation)
 		{
 		case GOTMB:
@@ -1082,7 +1084,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 			normalscale(res_arr, szInfo.w, szInfo.h, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
 		}
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 		WriteFloatBmp(sname, NORMALW, NORMALH, fnormal);
 #endif
 
@@ -1107,7 +1109,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	if (mv_arr != NULL) free(mv_arr);
 	if (res_arr != NULL) free(res_arr);
 
-#ifdef _DEBUG	
+#ifdef _TEST_MODULE	
 	return ret;
 #else
 	return final_arr;
@@ -1179,14 +1181,14 @@ static float getqpi(const char* fname)
 	return qp1;
 }
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 static int get_bitrate_qpi(const char* fname)
 #else
 static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 #endif
 {
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 	int ret = -1;
 	if (fname == 0) return ret;
 	filename = fname;
@@ -1208,7 +1210,7 @@ static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 	final_arr->data[1] = qp1;
 #endif
 
-#ifdef _DEBUG
+#ifdef _TEST_MODULE
 	ret = 0;
 	return ret;
 #else
@@ -1216,7 +1218,7 @@ static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 #endif
 }
 
-#ifdef _DEBUG	
+#ifdef _TEST_MODULE	
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -1256,7 +1258,7 @@ int main(int argc, char **argv)
 
 	return 0;
 }
-#endif
+#else //python
 
 static PyObject *get_num_gops(PyObject *self, PyObject *args)
 {
@@ -1405,3 +1407,5 @@ void initextractfts(void)
     }
 }
 #endif
+
+#endif //python
