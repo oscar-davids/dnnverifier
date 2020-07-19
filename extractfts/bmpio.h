@@ -3,8 +3,17 @@
 
 #define _DBG 1
 
+#if defined(_MSC_VER)
 #include <windows.h>
-#if 0
+#else
+
+typedef unsigned long       DWORD;
+typedef int                 BOOL;
+typedef unsigned char       BYTE;
+typedef unsigned short      WORD;
+#define MAX_PATH			256
+
+
 #pragma pack(1)
 typedef struct tagBITMAPFILEHEADER {
 	WORD    bfType;
