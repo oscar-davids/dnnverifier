@@ -10,7 +10,7 @@
 #include <libavcodec/avcodec.h>
 #include "extractfts.h"
 
-#define _TEST_MODULE
+//#define _TEST_MODULE
 
 #ifndef _TEST_MODULE
 #include <Python.h>

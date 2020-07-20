@@ -7,9 +7,9 @@ lipath = os.path.abspath(os.path.dirname(__file__))
 if platform.system() == "Windows":
     featuremaker_utils_module = Extension('extractfts',
 		sources = ['extractfts.c'],
-		include_dirs=[np.get_include(), './ffmpeg-4.2.1//include/'],
+		include_dirs=[np.get_include(), './ffmpeg-4.2.1/include/'],
 		extra_compile_args=['-DNDEBUG', '-O3'],
-		extra_link_args=['avformat.lib', 'avfilter.lib', 'avcodec.lib', 'avutil.lib', 'swscale.lib', '-LIBPATH:"D:/work/vqwork/dnnverifier/extractfts/ffmpeg-4.2.1/lib/"']		
+		extra_link_args=['avformat.lib', 'avfilter.lib', 'avcodec.lib', 'avutil.lib', 'swscale.lib', '-LIBPATH:"./ffmpeg-4.2.1/lib/"']		
 	)
 else:
 	featuremaker_utils_module = Extension('extractfts',
