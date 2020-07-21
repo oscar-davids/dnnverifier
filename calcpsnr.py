@@ -7,6 +7,7 @@ import math
 import platform
 import os.path
 import extractfts
+import datetime
 
 def calc_norefpsnr(videopath):
 
@@ -32,18 +33,30 @@ def main():
 
     infile = args.infile
     srcdir = args.dir
+    inflag = False
 
     if infile != None:
-        filelist = []
-        with open(infile, 'r') as csvfile:
-            # pass the file object to reader() to get the reader object
-            csv_reader = csv.reader(csvfile)
-            # Pass reader object to list() to get a list of lists
-            list_of_rows = list(csv_reader)
-        for i in range(1, len(list_of_rows)):
-            filelist.append(list_of_rows[i][0])
+        inflag = True
+        if srcdir == None:
+            print("select video directory!")
+            return
+
+    filelist = []
+    targetlist = []
+
+    if infile != None:
+        with open(infile) as csvfile:
+            reader = csv.DictReader(csvfile)
+            for row in reader:
+                print(row['id'], row['target'])
+                filelist.append( row['id'])
+                targetlist.append(row['target'])
+
+        #for i in range(1, len(list_of_rows)):
+        #filelist.append(list_of_rows[i][0])
     elif srcdir != None:
         filelist = [file for file in glob.glob(srcdir + "**/*.mp4")]
+        targetlist = [0 for _ in range(len(filelist))]
     else:
         print("empty argument")
         return
@@ -51,20 +64,26 @@ def main():
     #mepath = os.path.abspath(os.path.dirname(__file__))
     #vpath = os.path.join(mepath, srcdir)
 
-    filepsnr = open('write.csv', 'w')
+    outcsv = "psnrresult" + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + ".csv"
+
+    filepsnr = open(outcsv, 'w', newline='')
     wr = csv.writer(filepsnr)
 
-    wr.writerow([0, 'filepath', 'psnr'])
+    wr.writerow([0, 'filepath', 'psnr', 'target'])
 
     for i in range(0, len(filelist)):
         print(filelist[i])
         try:
-            psnr = calc_norefpsnr(filelist[i])
+            vpath = filelist[i]
+            if inflag:
+                vpath = srcdir + "/" + filelist[i]
+            psnr = calc_norefpsnr(vpath)
+
         except Exception as e:
             print(e)
 
         print(psnr)
-        wr.writerow([i + 1, filelist[i], psnr])
+        wr.writerow([i + 1, filelist[i], psnr, targetlist[0]])
 
 
     filepsnr.close()
