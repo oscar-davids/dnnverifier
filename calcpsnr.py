@@ -8,6 +8,8 @@ import platform
 import os.path
 import extractfts
 import datetime
+from pathlib import Path
+
 
 def calc_norefpsnr(videopath):
 
@@ -44,6 +46,8 @@ def main():
     filelist = []
     targetlist = []
 
+    #srcdirpath = os.path.commonpath(srcdir)
+
     if infile != None:
         with open(infile) as csvfile:
             reader = csv.DictReader(csvfile)
@@ -55,8 +59,18 @@ def main():
         #for i in range(1, len(list_of_rows)):
         #filelist.append(list_of_rows[i][0])
     elif srcdir != None:
-        filelist = [file for file in glob.glob(srcdir + "**/*.mp4")]
-        targetlist = [0 for _ in range(len(filelist))]
+        #filelist = [file for file in glob.glob(srcdir + "/**/*.mp4")]
+        for fpath in glob.iglob(srcdir + "/**/*.mp4", recursive=True):
+            strtmp = fpath.replace(srcdir + "\\",'')
+            if len(strtmp.split("\\")) and len(strtmp.split("\\")[0]) == 4:
+                filelist.append(fpath)
+                targetlist.append(0)
+            else:
+                filelist.append(fpath)
+                targetlist.append(1)
+
+        #filelist = [file for file in Path(srcdir).rglob("*.mp4")]
+        #targetlist = [0 for _ in range(len(filelist))]
     else:
         print("empty argument")
         return
