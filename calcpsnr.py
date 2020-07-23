@@ -8,6 +8,8 @@ import platform
 import os.path
 import extractfts
 import datetime
+import time
+
 from pathlib import Path
 
 
@@ -80,10 +82,13 @@ def main():
 
     outcsv = "psnrresult" + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + ".csv"
 
+    totalcount = len(filelist)
     filepsnr = open(outcsv, 'w', newline='')
     wr = csv.writer(filepsnr)
 
     wr.writerow([0, 'filepath', 'psnr', 'target'])
+
+    start_time = time.time()
 
     for i in range(0, len(filelist)):
         print(filelist[i])
@@ -99,6 +104,10 @@ def main():
         print(psnr)
         wr.writerow([i + 1, filelist[i], psnr, targetlist[0]])
 
+    totaltime = (time.time() - start_time)
+    speed = totaltime / totalcount
+
+    print(speed, 'per one file')
 
     filepsnr.close()
 
