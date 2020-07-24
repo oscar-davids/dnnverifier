@@ -35,9 +35,11 @@ def perf_measure(y_actual, y_hat):
 def main():
     parser = argparse.ArgumentParser(description='psnr calculation parser.')
     parser.add_argument('--infile', type=str, help='select directory', default='psnrresult_total.csv')
+    parser.add_argument('--feature', type=str, help='select directory', default='psnr')
     args = parser.parse_args()
 
     infile = args.infile
+    feature = args.feature
 
     if infile == None:
         print("select psnr result csv file")
@@ -50,7 +52,7 @@ def main():
             reader = csv.DictReader(csvfile)
             for row in reader:
                 #print(row['psnr'], row['target'])
-                scores.append( float(row['psnr']))
+                scores.append( float(row[feature]))
                 lables.append(int(row['target']))
 
     smax = float(max(scores))
@@ -83,12 +85,13 @@ def main():
     pp.title(' thresh - far/fpr')
     pp.show()
 
-    for threval in np.arange(0.5, 1.0, 0.05):
+    for threval in np.arange(0.01, 1.0, 0.01):
         predictval = (ascores > threval)
 
         TP, FP, TN, FN = perf_measure(alable, predictval)
 
-        FACC = accuracy_score(alable, predictval)
+        #FACC = accuracy_score(alable, predictval)
+        FACC = (TP + FP) / float(len(alable))
         FFAR = FP / float(FP + TN)
         FFRR = FN / float(TP + FN)
 
