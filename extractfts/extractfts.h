@@ -13,6 +13,13 @@
 #include "h264_sei.h"
 #include "videodsp.h"
 
+typedef enum VDecFormat {
+	VDEC_H264 = 0,
+	VDEC_MP4,
+	VDEC_TS,	
+	VDEC_MAX,
+} VDecFormat;
+
 typedef          int       atomic_int;
 
 typedef struct ThreadFrame {

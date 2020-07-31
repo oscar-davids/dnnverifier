@@ -10,7 +10,7 @@
 #include <libavcodec/avcodec.h>
 #include "extractfts.h"
 
-//#define _TEST_MODULE
+#define _TEST_MODULE
 
 #ifndef _TEST_MODULE
 #include <Python.h>
@@ -1216,6 +1216,102 @@ static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 #else
 	return final_arr;
 #endif
+}
+
+
+
+#ifdef _TEST_MODULE
+static int getdctbuffer(const char* fname, void** dct_arr)
+#else
+static PyObject *getdctbuffer(PyObject *self, PyObject *args)
+#endif
+{
+#ifdef _TEST_MODULE
+	int ret = 0;
+	AVPacket pkt = { 0 };
+	int got_picture;
+	int cur_pos = 0;
+	AVFrame *pFrameBGR = NULL;
+	int *accu_src = NULL;
+	int *accu_src_old = NULL;
+	int nsuccess = 0;
+	AVCodec *dec;
+	AVCodecContext *dec_ctx = NULL;
+	int stream_idx = 0;
+
+	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
+
+	if (fname == NULL) return -1;
+
+	if (avformat_open_input(&fmt_ctx, fname, NULL, NULL) < 0) {
+		fprintf(stderr, "Could not open source file %s\n", fname);
+		return -1;
+	}
+
+	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+		fprintf(stderr, "Could not find stream information\n");
+		return -1;
+	}
+
+	ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
+	if (ret < 0) {
+		fprintf(stderr, "Could not find %s stream in input file '%s'\n",
+			av_get_media_type_string(AVMEDIA_TYPE_VIDEO), src_filename);
+		return ret;
+	}
+
+	stream_idx = ret;
+
+	dec_ctx = avcodec_alloc_context3(dec);
+	
+	if (!dec_ctx) {
+		fprintf(stderr, "failed to allocate codec\n");
+		return AVERROR(EINVAL);
+	}
+
+	ret = avcodec_parameters_to_context(dec_ctx, fmt_ctx->streams[stream_idx]->codecpar);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to copy codec parameters to codec context\n");
+		return ret;
+	}
+
+	av_dump_format(fmt_ctx, 0, fname, 0);
+	if ((ret = avcodec_open2(dec_ctx, dec, NULL)) < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot open video decoder\n");
+		return ret;
+	}
+
+	unsigned char *dummy = NULL;
+	int dummy_len;
+	AVBitStreamFilterContext* bsfc = av_bitstream_filter_init("h264_mp4toannexb");
+	av_bitstream_filter_filter(bsfc, dec_ctx, NULL, &dummy, &dummy_len, NULL, 0, 0);
+	//dec_ctx->extradata,dec_ctx-->extradata_size
+
+	while (av_read_frame(fmt_ctx, &pkt) >= 0 ) {
+
+		if (pkt.stream_index == stream_idx)
+		{
+			//ret = decode_packet(&pkt);
+			ret = avcodec_send_packet(video_dec_ctx, &pkt);
+			if (ret < 0) {
+				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				return ret;
+			}
+			AVPacket temppack;
+			av_packet_ref(&temppack, &pkt);
+			av_bitstream_filter_filter(bsfc, dec_ctx, NULL, &temppack.data, &temppack.size, temppack.data, temppack.size, 0);
+			av_packet_unref(&temppack);
+		}
+	}
+
+	free(dummy);
+
+#endif
+
+#ifdef _TEST_MODULE
+	return 0;
+#endif
+
 }
 
 #ifdef _TEST_MODULE	
