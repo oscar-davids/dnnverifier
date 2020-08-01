@@ -1239,6 +1239,8 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 	AVCodecContext *dec_ctx = NULL;
 	int stream_idx = 0;
 
+	video_frame_count = 0;
+
 	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
 
 	if (fname == NULL) return -1;
@@ -1281,10 +1283,18 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 		return ret;
 	}
 
-	unsigned char *dummy = NULL;
-	int dummy_len;
-	AVBitStreamFilterContext* bsfc = av_bitstream_filter_init("h264_mp4toannexb");
-	av_bitstream_filter_filter(bsfc, dec_ctx, NULL, &dummy, &dummy_len, NULL, 0, 0);
+	AVBitStreamFilter *bsf = av_bsf_get_by_name("h264_mp4toannexb");
+	AVBSFContext *bsfctx = NULL;
+	if ((ret = av_bsf_alloc(bsf, &bsfctx)))
+		return ret;
+
+	if (((ret = avcodec_parameters_from_context(bsfctx->par_in, dec_ctx)) < 0) ||
+		((ret = av_bsf_init(bsfctx)) < 0)) {
+		av_bsf_free(&bsfctx);
+		return -1;
+	}
+	
+	//av_bitstream_filter_filter(bsf, dec_ctx, NULL, &dummy, &dummy_len, NULL, 0, 0);
 	//dec_ctx->extradata,dec_ctx-->extradata_size
 
 	while (av_read_frame(fmt_ctx, &pkt) >= 0 ) {
@@ -1292,19 +1302,28 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 		if (pkt.stream_index == stream_idx)
 		{
 			//ret = decode_packet(&pkt);
-			ret = avcodec_send_packet(video_dec_ctx, &pkt);
-			if (ret < 0) {
-				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+			
+			AVPacket temppack = { 0 };
+			AVPacket filtered_packet = { 0 };
+			av_packet_ref(&temppack, &pkt);
+			if ((ret = av_bsf_send_packet(bsfctx, &temppack)) < 0) {
+				av_packet_unref(&temppack);
 				return ret;
 			}
-			AVPacket temppack;
-			av_packet_ref(&temppack, &pkt);
-			av_bitstream_filter_filter(bsfc, dec_ctx, NULL, &temppack.data, &temppack.size, temppack.data, temppack.size, 0);
+
+			if ((ret = av_bsf_receive_packet(bsfctx, &filtered_packet)) < 0)
+				return ret;
+
+			//bsfctx->par_out->extradata;
+			//bsfctx->par_out->extradata_size;
+
+			video_frame_count++;			
+			//av_bitstream_filter_filter(bsf, dec_ctx, NULL, &temppack.data, &temppack.size, temppack.data, temppack.size, 0);
 			av_packet_unref(&temppack);
 		}
 	}
-
-	free(dummy);
+	
+	av_bsf_free(&bsfctx);
 
 #endif
 
@@ -1332,7 +1351,14 @@ int main(int argc, char **argv)
 
 	float bitrate, qpi;
 
-	//calc_bitrate_qpi(&bitrate, &qp1);
+	getdctbuffer(src_filename, NULL);
+
+	printf("framecount = %d .\n", video_frame_count);
+
+	return 0;
+
+
+	calc_bitrate_qpi(&bitrate, &qpi);	
 	bitrate = getbitrate(src_filename);
 	qpi = getqpi(src_filename);
 
@@ -1344,7 +1370,7 @@ int main(int argc, char **argv)
 
 	printf("gopnum = %d frame = %d .\n", gop_count, frame_count);
 
-	//loadft(src_filename, 0, 8, 6);
+	loadft(src_filename, 0, 8, 6);
 	/*
 	for (size_t i = 1; i < 240; i++)
 	{
