@@ -20,11 +20,11 @@
 //define part
 #define FF_INPUT_BUFFER_PADDING_SIZE 32
 
-#define GOTFM 1
-#define GOTMB 2
-#define GOTQP 4
-#define GOTMV 8
-#define GOTRD 16
+#define GOTFM 1		//rgb
+#define GOTMB 2		//macro block
+#define GOTQP 4		//qp table
+#define GOTMV 8		//motion vector
+#define GOTRD 16	//residual error
 
 #define NORMALW		64
 #define NORMALH		64
@@ -700,13 +700,12 @@ int decode_videowithffmpeg(
 
 		if (pkt.stream_index == video_stream_idx)
 		{
-			//ret = decode_packet(&pkt);
+
 			ret = avcodec_send_packet(video_dec_ctx, &pkt);
 			if (ret < 0) {
 				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
 				return ret;
 			}
-
 			while (ret >= 0) {
 				ret = avcodec_receive_frame(video_dec_ctx, frame);
 				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
@@ -720,7 +719,6 @@ int decode_videowithffmpeg(
 				if (frame->pict_type == AV_PICTURE_TYPE_I) {
 					++cur_gop;
 				}
-
 				if (/*cur_gop == gop_target &&*/ cur_pos <= pos_target)
 				{
 					if (ret >= 0) {
@@ -869,10 +867,11 @@ int decode_videowithffmpeg(
 						}
 
 
-						if (cur_pos == pos_target && representation == GOTRD
+						if (cur_pos == pos_target && (representation == GOTRD || representation == GOTFM)
 							/*|| (cur_pos == pos_target - 1 && !accumulate && representation == GOTRD) || cur_pos == pos_target*/) 
 						{
 							create_and_load_bgr(frame, pFrameBGR, NULL, bgr_arr, cur_pos, pos_target);
+							if(representation == GOTFM) nsuccess = 1;
 						}
 						if ((representation & GOTMV) || (representation & GOTRD)) {
 							AVFrameSideData *sd;
@@ -899,7 +898,6 @@ int decode_videowithffmpeg(
 						av_frame_unref(frame);
 					}
 				}
-				
 			}
 		}
 
@@ -1034,6 +1032,9 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 #ifdef _TEST_MODULE
 		switch (representation)
 		{
+		case GOTFM:
+			sprintf(sname, "D:/debugrgb_%03d.bmp", framenum);
+			break;
 		case GOTMB:
 			sprintf(sname, "D:/debugmb_%03d.bmp", framenum);
 			break;
@@ -1060,6 +1061,9 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		fnormal = (float*)malloc(NORMALW * NORMALH * sizeof(float));
 		memset(fnormal, 0x00, NORMALW * NORMALH * sizeof(float));
 
+		if (representation == GOTFM) {
+			WriteColorBmp(sname, szInfo.w, szInfo.h, bgr_arr);
+		}
 		if (representation == GOTMB) {
 			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
 		}
@@ -1085,6 +1089,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		}
 
 #ifdef _TEST_MODULE
+		if(representation != GOTFM)
 		WriteFloatBmp(sname, NORMALW, NORMALH, fnormal);
 #endif
 
@@ -1349,14 +1354,12 @@ int main(int argc, char **argv)
 	int gop_count, frame_count;
 	filename = src_filename;
 
+#if 0
 	float bitrate, qpi;
 
 	getdctbuffer(src_filename, NULL);
 
 	printf("framecount = %d .\n", video_frame_count);
-
-	return 0;
-
 
 	calc_bitrate_qpi(&bitrate, &qpi);	
 	bitrate = getbitrate(src_filename);
@@ -1369,8 +1372,11 @@ int main(int argc, char **argv)
 	count_frames(&gop_count, &frame_count);
 
 	printf("gopnum = %d frame = %d .\n", gop_count, frame_count);
+#endif
 
-	loadft(src_filename, 0, 8, 6);
+
+	loadft(src_filename, 0, 8, 1);
+
 	/*
 	for (size_t i = 1; i < 240; i++)
 	{
