@@ -25,10 +25,15 @@
 #define GOTQP 4		//qp table
 #define GOTMV 8		//motion vector
 #define GOTRD 16	//residual error
+#define GOTDC 32	//DCT buffer
 
 #define NORMALW		64
 #define NORMALH		64
 #define HALFNORMALH 32
+
+#define INPUT_INTTYPE	0 //int array type
+#define INPUT_SHORTTYPE 1 //short array type
+
 //typedef part
 typedef unsigned char uint8_t;
 
@@ -645,7 +650,11 @@ static int decode_packet(const AVPacket *pkt)
 int decode_videowithffmpeg(
 	const char* fname, int gop_target, int pos_target,
 	void** bgr_arr,	void** mb_arr,	void** qp_arr,
+#if EXTRACT_DCT
+	void** mv_arr, void** res_arr, void** dct_arr,
+#else
 	void** mv_arr,	void** res_arr,
+#endif
 	int representation,	int accumulate, sizeInfo *szInfo) {
 
 
@@ -719,7 +728,7 @@ int decode_videowithffmpeg(
 				if (frame->pict_type == AV_PICTURE_TYPE_I) {
 					++cur_gop;
 				}
-				if (/*cur_gop == gop_target &&*/ cur_pos <= pos_target)
+				if (cur_gop == gop_target && cur_pos == pos_target)
 				{
 					if (ret >= 0) {
 						int i;
@@ -771,18 +780,21 @@ int decode_videowithffmpeg(
 							*bgr_arr = malloc(w * h * 3 * sizeof(uint8_t));
 							memset(*bgr_arr, 0x00, w * h * 3 * sizeof(uint8_t));
 						}
+#if EXTRACT_DCT			
+						//get luma dct buffer
+						if ((representation & GOTDC) && !(*dct_arr)) { // get dct 
+							*dct_arr = malloc(w * h * sizeof(uint16_t));
+							memset(*dct_arr, 0x00, w * h * sizeof(uint16_t));
+						}
+#endif
 
 						szInfo->w = w;
 						szInfo->h = h;
 
 						hcontext = (H264Context*)video_dec_ctx->priv_data;
-#ifdef CALA_NOREF_PPSNR
-						H264SliceContext* slice =  hcontext->slice_ctx;
-#endif
 
 						//get macroblock
-						if (hcontext && (representation & GOTMB)) {
-							hcontext = (H264Context*)video_dec_ctx->priv_data;
+						if (hcontext && (representation & GOTMB)) {							
 							H264Picture *pic = hcontext->next_output_pic;
 							int *d_arr = (int *)*mb_arr;
 
@@ -791,51 +803,7 @@ int decode_videowithffmpeg(
 								for (int j = 0; j < hcontext->mb_height; j++) {
 									for (int i = 0; i < hcontext->mb_width; i++) {
 										int num = j * hcontext->mb_stride + i;
-										int mbtype = pic->mb_type[num];
-
-										if (mbtype & MB_TYPE_INTRA4x4) {
-											d_arr[hcontext->mb_width*j + i] += 10;
-										}
-										if (mbtype&MB_TYPE_INTRA16x16) {
-											d_arr[hcontext->mb_width*j + i] += 9;
-										}
-										if (mbtype&MB_TYPE_INTRA_PCM) {
-											d_arr[hcontext->mb_width*j + i] += 8;
-										}
-										if (mbtype&MB_TYPE_16x16) {
-											d_arr[hcontext->mb_width*j + i] += 7;
-										}
-										if (mbtype&MB_TYPE_16x8) {
-											d_arr[hcontext->mb_width*j + i] += 6;
-										}
-										if (mbtype&MB_TYPE_8x16) {
-											d_arr[hcontext->mb_width*j + i] += 5;
-										}
-										if (mbtype&MB_TYPE_8x8) {
-											d_arr[hcontext->mb_width*j + i] += 4;
-										}
-										if (mbtype&MB_TYPE_SKIP) {
-											d_arr[hcontext->mb_width*j + i] += 3;
-										}
-										if (mbtype&MB_TYPE_L0) {
-											d_arr[hcontext->mb_width*j + i] += 2;
-										}
-										if (mbtype&MB_TYPE_L1) {
-											d_arr[hcontext->mb_width*j + i] += 1;
-										}
-										///don't often used
-										if (mbtype&MB_TYPE_INTERLACED) {
-										}
-										if (mbtype&MB_TYPE_DIRECT2) {
-										}
-										if (mbtype&MB_TYPE_ACPRED) {
-										}
-										if (mbtype&MB_TYPE_GMC) {
-										}
-										if (mbtype&MB_TYPE_QUANT) {
-										}
-										if (mbtype&MB_TYPE_CBP) {
-										}
+										d_arr[hcontext->mb_width*j + i] = pic->mb_type[num];										
 									}
 								}
 
@@ -894,10 +862,17 @@ int decode_videowithffmpeg(
 							}
 						}
 						
-						cur_pos++;
+#if EXTRACT_DCT//get dct buffer
+						if (hcontext && (representation & GOTDC))
+						{
+							memcpy(*dct_arr, hcontext->dcmatrix, w * h * sizeof(uint16_t));
+							nsuccess = 1;
+						}
+#endif						
 						av_frame_unref(frame);
-					}
+					}					
 				}
+				cur_pos++;
 			}
 		}
 
@@ -939,8 +914,7 @@ float blerp(float c00, float c10, float c01, float c11, float tx, float ty) {
 	return lerp(lerp(c00, c10, tx), lerp(c01, c11, tx), ty);
 }
 
-void normalscale(int *src, int srcw, int srch, float *dst,  int dsw, int dsh, int fnum) {
-
+void normalscale(int *src, int srcw, int srch, float *dst,  int dsw, int dsh, int type) {
 
 	float scalew = (float)srcw / dsw;
 	float scaleh = (float)srch / dsh;
@@ -978,45 +952,72 @@ void normalscale(int *src, int srcw, int srch, float *dst,  int dsw, int dsh, in
 		}
 	}	
 }
+void normalshortscale(short *src, int srcw, int srch, float *dst, int dsw, int dsh, int type) {
 
+	float scalew = (float)srcw / dsw;
+	float scaleh = (float)srch / dsh;
+	int x, y;
+	//linear interpolation
+	if (1)
+	{
+		for (y = 0; y < dsh; y++) {
+			for (x = 0; x < dsw; x++)
+			{
+
+				int gyi = (int)(y * scaleh); if (gyi >= srch) gyi = srch - 1;
+				int gxi = (int)(x * scalew); if (gxi >= srcw) gxi = srcw - 1;
+				dst[(y*dsw) + x] = src[srcw *gyi + gxi];
+			}
+		}
+	}
+}
 #ifdef _TEST_MODULE
 #include "bmpio.h"
 #endif // DEBUG
 
 #ifdef _TEST_MODULE
-static int loadft(const char* fname, int gopidx, int framenum, int present)
+static int loadft(const char* fname, int gopidx, int framenum, int present, int tw, int th)
 #else
 static PyObject *loadft(PyObject *self, PyObject *args)
 #endif
 {
 
 	int ret = -1;
-	int gop_target, pos_target, representation, accumulate;
+	int gop_target, pos_target, representation, accumulate , destw, desth;
 
 #ifdef _TEST_MODULE
 	char sname[MAX_PATH] = { 0, };
 	filename = fname;
 	gop_target = gopidx;
 	pos_target = framenum;
-	representation = present;	
+	representation = present;
+	destw = tw;
+	desth = th;
 #else
 	PyArrayObject *final_arr = NULL;	
-	if (!PyArg_ParseTuple(args, "siii", &filename,
-		&gop_target, &pos_target, &representation)) return NULL;
+	if (!PyArg_ParseTuple(args, "siiiii", &filename,
+		&gop_target, &pos_target, &representation, &destw , &desth)) return NULL;
 #endif
 	accumulate = 1;
 
-	uint8_t *bgr_arr = NULL;	
+	uint8_t *bgr_arr = NULL;
 	int *mb_arr = NULL;
 	int *qp_arr = NULL;
 	int *mv_arr = NULL;
 	int *res_arr = NULL;
-
+#if EXTRACT_DCT
+	uint16_t *dct_arr = NULL;
+#endif
 	sizeInfo szInfo = { 0, };
 
 	if (decode_videowithffmpeg(filename, gop_target, pos_target,
+#if EXTRACT_DCT
+		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr, &dct_arr,
+#else
 		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr,
-		representation, accumulate, &szInfo) < 0) {
+#endif
+		representation, accumulate, &szInfo) < 0) 
+	{
 
 		printf("Decoding video failed.\n");
 #ifdef _TEST_MODULE
@@ -1025,6 +1026,13 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		return final_arr;
 #endif
 	}
+
+	//setting normal width & height
+	if (destw < 0) destw = szInfo.w;
+	if (desth < 0) desth = szInfo.h;
+
+	int halfdesth = desth >> 1;
+
 
 	//normalize buffer
 	if (szInfo.repeat > 0)
@@ -1053,55 +1061,69 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		case GOTMV ^ GOTRD:
 			sprintf(sname, "D:/debugmvrd_%03d.bmp", framenum);
 			break;
+		case GOTDC:
+			sprintf(sname, "D:/debugdct_%03d.bmp", framenum);			
+			break;
 		default:
 			break;
 		}
 #endif
 		float* fnormal = NULL;
-		fnormal = (float*)malloc(NORMALW * NORMALH * sizeof(float));
-		memset(fnormal, 0x00, NORMALW * NORMALH * sizeof(float));
+		fnormal = (float*)malloc(destw * desth * sizeof(float));
+		memset(fnormal, 0x00, destw * desth * sizeof(float));
 
-		if (representation == GOTFM) {
-			WriteColorBmp(sname, szInfo.w, szInfo.h, bgr_arr);
-		}
 		if (representation == GOTMB) {
-			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
+			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, destw, desth, szInfo.repeat);
 		}
 		if (representation == GOTQP) {
-			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, NORMALH, szInfo.repeat);
+			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal, destw, desth, szInfo.repeat);
 		}
 		if (representation == GOTMV) {
-			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, NORMALW, NORMALH, szInfo.repeat);
+			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, destw, desth, szInfo.repeat);
 		}
 		if (representation == GOTRD) {
-			normalscale(res_arr, szInfo.w, szInfo.h, fnormal, NORMALW, NORMALH, szInfo.repeat);
+			normalscale(res_arr, szInfo.w, szInfo.h, fnormal, destw, desth, szInfo.repeat);
 		}
 
 		if (representation == (GOTMB ^ GOTQP)) // 6
 		{
-			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, NORMALW, HALFNORMALH, szInfo.repeat);
-			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
+			normalscale(mb_arr, szInfo.mw, szInfo.mh, fnormal, destw, halfdesth, szInfo.repeat);
+			normalscale(qp_arr, szInfo.mw, szInfo.mh, fnormal + destw * halfdesth, destw, halfdesth, szInfo.repeat);
 		}
 		if (representation == (GOTMV ^ GOTRD)) // 24
 		{
-			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, NORMALW, HALFNORMALH, szInfo.repeat);
-			normalscale(res_arr, szInfo.w, szInfo.h, fnormal + NORMALW * HALFNORMALH, NORMALW, HALFNORMALH, szInfo.repeat);
+			normalscale(mv_arr, szInfo.w, szInfo.h, fnormal, destw, halfdesth, szInfo.repeat);
+			normalscale(res_arr, szInfo.w, szInfo.h, fnormal + destw * halfdesth, destw, halfdesth, szInfo.repeat);
 		}
+#if EXTRACT_DCT
+		if (representation == GOTDC)
+		{
+			normalshortscale(dct_arr, szInfo.w, szInfo.h, fnormal, destw, desth, szInfo.repeat);
+		}
+#endif
 
 #ifdef _TEST_MODULE
-		if(representation != GOTFM)
-		WriteFloatBmp(sname, NORMALW, NORMALH, fnormal);
+		if (representation == GOTFM) {
+			WriteColorBmp(sname, szInfo.w, szInfo.h, bgr_arr);
+		}
+#if EXTRACT_DCT
+		if (representation == GOTDC) {
+			WriteShortBmp(sname, szInfo.w, szInfo.h, dct_arr);
+		}
+#endif
+		if (representation != GOTFM && representation != GOTDC)
+			WriteFloatBmp(sname, destw, desth, fnormal);
+
 #endif
 
 #ifdef Py_PYTHON_H
 		npy_intp dims[2];
-		dims[0] = NORMALH * NORMALW;
+		dims[0] = desth * destw;
 		dims[1] = 1;		
 		final_arr = PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);
 
-		int size = NORMALH * NORMALW  * sizeof(float);
-		memcpy(final_arr->data, fnormal, size);	
-		
+		int buffersize = desth * destw  * sizeof(float);
+		memcpy(final_arr->data, fnormal, buffersize);
 #endif
 		if (fnormal != NULL) free(fnormal);
 		ret = 0;
@@ -1375,14 +1397,14 @@ int main(int argc, char **argv)
 #endif
 
 
-	loadft(src_filename, 0, 8, 1);
-
-	/*
-	for (size_t i = 1; i < 240; i++)
+	//loadft(src_filename, 0, 5, GOTMB);
+	//loadft(src_filename, 0, 8, GOTDC);
+	
+	for (size_t i = 1; i < 20; i++)
 	{
-		loadft(src_filename, 0, i, 16);
+		loadft(src_filename, 0, i, GOTDC, NORMALW, NORMALH);
 	}
-	*/
+	
 
 	return 0;
 }

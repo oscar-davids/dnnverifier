@@ -134,12 +134,10 @@ def get_features(video_data, frame_batch_size=8, device='cuda'):
     output = []
 
     while frame_start < nframecount - 2:
-
-        features = extractfts.loadft(current_video, 0, frame_start, 16)
+        features = extractfts.loadft(current_video, 0, frame_start, 16, 64, 64)
         if len(features) > 0:
             output.append(features)
         frame_start = frame_start + 1
-
 
 	#output = torch.squeeze(output)
 

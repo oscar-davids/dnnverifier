@@ -13,6 +13,10 @@
 #include "h264_sei.h"
 #include "videodsp.h"
 
+#if defined(_MSC_VER)
+//#pragma pack(1)
+#endif
+
 typedef enum VDecFormat {
 	VDEC_H264 = 0,
 	VDEC_MP4,
@@ -32,6 +36,8 @@ typedef struct ThreadFrame {
 
 
 #define CALA_NOREF_PPSNR		1
+
+#define EXTRACT_DCT				1
 
 #define H264_MAX_PICTURE_COUNT 36
 
@@ -997,7 +1003,16 @@ typedef struct H264Context {
 	AVBufferPool *motion_val_pool;
 	AVBufferPool *ref_index_pool;
 	int ref2frm[MAX_SLICES][2][64];     ///< reference to frame number lists, used in the loop filter, the first 2 are for -2,-1
+
+#if EXTRACT_DCT
+	int16_t  *dcmatrix; //dct matrix for frame
+#endif	
+
 } H264Context;
 
+
+#if defined(_MSC_VER)
+//#pragma pack()
+#endif
 
 #endif

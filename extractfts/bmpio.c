@@ -229,15 +229,42 @@ int WriteFloatBmp(char* bmpFileName, int width, int height, float *greyimg)
 	int y, x;
 	unsigned char *greybuff = (unsigned char *)malloc(width*height);
 	float fmax = -1000000.0;
+	float fmin = 1000000.0;
 	for (y = 0; y < width * height; y++)
 	{
 		if (greyimg[y] > fmax) fmax = greyimg[y];
+		if (greyimg[y] < fmin) fmin = greyimg[y];
 	}
 
-	float fscale = 255.0 / fmax;
+	float fscale = 255.0 / (fmax - fmin);
 	for (y = 0; y < width * height; y++)
 	{
-		greybuff[y] = (unsigned char)greyimg[y] * fscale;
+		greybuff[y] = (unsigned char)((float)(greyimg[y] - fmin))* fscale;
+	}
+
+	WriteGreyBmp(bmpFileName, width, height, greybuff);
+
+	if (greybuff) free(greybuff);
+
+	return 0;
+}
+
+extern int WriteShortBmp(char* bmpFileName, int width, int height, short *greyimg)
+{
+	int y, x;
+	unsigned char *greybuff = (unsigned char *)malloc(width*height);
+	short fmax = -32767;
+	short fmin = 32767;
+	for (y = 0; y < width * height; y++)
+	{
+		if (greyimg[y] > fmax) fmax = greyimg[y];
+		if (greyimg[y] < fmin) fmin = greyimg[y];
+	}
+
+	float fscale = 255.0 / (fmax - fmin);
+	for (y = 0; y < width * height; y++)
+	{
+		greybuff[y] = (unsigned char)((float)(greyimg[y] - fmin) * fscale);
 	}
 
 	WriteGreyBmp(bmpFileName, width, height, greybuff);
