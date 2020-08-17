@@ -80,7 +80,7 @@ def main():
     #mepath = os.path.abspath(os.path.dirname(__file__))
     #vpath = os.path.join(mepath, srcdir)
 
-    outcsv = "psnrresult" + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + ".csv"
+    outcsv = "resultpsnr" + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + ".csv"
 
     totalcount = len(filelist)
     filepsnr = open(outcsv, 'w', newline='')

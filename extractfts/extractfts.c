@@ -681,7 +681,7 @@ int decode_videowithffmpeg(
 
 	open_codec_context(fmt_ctx, AVMEDIA_TYPE_VIDEO);
 
-	av_dump_format(fmt_ctx, 0, fname, 0);
+	//av_dump_format(fmt_ctx, 0, fname, 0);
 	if (!video_stream) {
 		fprintf(stderr, "Could not find video stream in the input, aborting\n");
 		ret = 1;
@@ -1106,12 +1106,12 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		if (representation == GOTFM) {
 			WriteColorBmp(sname, szInfo.w, szInfo.h, bgr_arr);
 		}
-#if EXTRACT_DCT
+#if  0 //EXTRACT_DCT
 		if (representation == GOTDC) {
 			WriteShortBmp(sname, szInfo.w, szInfo.h, dct_arr);
 		}
 #endif
-		if (representation != GOTFM && representation != GOTDC)
+		if (representation != GOTFM)
 			WriteFloatBmp(sname, destw, desth, fnormal);
 
 #endif
@@ -1135,7 +1135,9 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	if (qp_arr != NULL) free(qp_arr);
 	if (mv_arr != NULL) free(mv_arr);
 	if (res_arr != NULL) free(res_arr);
-
+#if EXTRACT_DCT
+	if (dct_arr != NULL) free(dct_arr);	
+#endif
 #ifdef _TEST_MODULE	
 	return ret;
 #else
@@ -1397,12 +1399,11 @@ int main(int argc, char **argv)
 #endif
 
 
-	//loadft(src_filename, 0, 5, GOTMB);
-	//loadft(src_filename, 0, 8, GOTDC);
+	//loadft(src_filename, 0, 5, GOTMB, NORMALW, NORMALH);	
 	
-	for (size_t i = 1; i < 20; i++)
+	for (size_t i = 0; i < 20; i++)
 	{
-		loadft(src_filename, 0, i, GOTDC, NORMALW, NORMALH);
+		loadft(src_filename, 0, i, GOTDC, 480, 270);
 	}
 	
 
