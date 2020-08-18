@@ -42,8 +42,8 @@ def calc_dctdiff(renditionpath , srcpath):
         return dctval
 
     try:
-        destdct = extractfts.loadft(renditionpath,0, 0, 32, 480, 270)
-        srcdct = extractfts.loadft(srcpath, 0, 0, 32, 480, 270)
+        destdct = extractfts.loadft(renditionpath,0, 5, 32, 480, 270)
+        srcdct = extractfts.loadft(srcpath, 0, 5, 32, 480, 270)
 
         if len(destdct) > 0 & len(srcdct):
             _, max_val, _, _ = cv2.minMaxLoc(srcdct - destdct)
