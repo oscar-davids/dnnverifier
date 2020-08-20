@@ -5,7 +5,11 @@
 #include "pthread.h"
 #endif
 
-#define MAX_NUM_THREADS 11	//master + rendition 10 at same yime
+#ifdef _DEBUG
+#include "bmpio.h"
+#endif
+
+#define MAX_NUM_THREADS 11	//master + rendition 10 at same time
 #define MAX_NUM_SAMPLES 50	//sample count for compare
 
 int open_context(LPDecContext* lpcontext)
@@ -32,6 +36,9 @@ int open_context(LPDecContext* lpcontext)
 		lpcontext->video_stream = ret;
 		lpcontext->vstream = lpcontext->input_ctx->streams[lpcontext->video_stream];
 		lpcontext->vcontext = avcodec_alloc_context3(lpcontext->vcodec);
+
+		lpcontext->vcontext->thread_count = 16;
+
 		if (lpcontext->vcontext) {
 			avcodec_parameters_to_context(lpcontext->vcontext, lpcontext->vstream->codecpar);			
 			if (avcodec_open2(lpcontext->vcontext, lpcontext->vcodec, NULL) >= 0) {
@@ -81,11 +88,39 @@ int open_context(LPDecContext* lpcontext)
 	} else {
 		fprintf(stderr, "Cannot find a audio stream in the input file\n");
 	}
-	
+	lpcontext->normalw = 480;
+	lpcontext->normalh = 270;
+
 	return LP_OK;
 }
 void release_context(LPDecContext* lpcontext)
 {
+	//release timestamp array
+	if (lpcontext->frameindexs)
+		free(lpcontext->frameindexs);
+	if (lpcontext->framestamps)
+		free(lpcontext->framestamps);
+	if (lpcontext->framediffps)
+		free(lpcontext->framediffps);
+	if (lpcontext->audiodiffps)
+		free(lpcontext->audiodiffps);
+
+	//release frame and audio array
+	for (int i = 0; i < lpcontext->samplecount; i++)
+	{
+		if (lpcontext->alivevideo && lpcontext->listfrmame[i])
+			av_frame_free(&lpcontext->listfrmame[i]);
+
+		if (lpcontext->aliveaudio && lpcontext->listaudio[i])
+			av_packet_unref(lpcontext->listaudio[i]);
+	}
+	if (lpcontext->listfrmame) free(lpcontext->listfrmame);
+	if (lpcontext->listaudio) free(lpcontext->listaudio);
+	
+	//release media context
+	if (lpcontext->sws_rgb_scale)
+		sws_freeContext(lpcontext->sws_rgb_scale);
+
 	if (lpcontext->vcontext)
 		avcodec_free_context(&lpcontext->vcontext);
 
@@ -101,10 +136,22 @@ void* decode_frames(LPDecContext* context)
 		return LP_ERROR_NULL_POINT;
 	
 	int ret = 0;	
-	int i, got_frame;
+	int i, got_frame, index;
+	double tolerence = 1.0 / (context->fps * 2.0);
+	double diffpts = 0.0;
 	AVPacket packet;
+	AVFrame *ptmpframe = NULL;
 	
 	context->readframe = av_frame_alloc();
+	if (context->alivevideo) {
+		context->listfrmame = (AVFrame**)malloc(sizeof(AVFrame*)*context->samplecount);
+		memset(context->listfrmame, 0x00, sizeof(AVFrame*)*context->samplecount);
+	}
+	if (context->aliveaudio) {
+		context->listaudio = (AVPacket**)malloc(sizeof(AVPacket*)*context->samplecount);
+		memset(context->listaudio, 0x00, sizeof(AVPacket*)*context->samplecount);
+	}
+
 
 	while (ret >= 0) {
 
@@ -135,36 +182,69 @@ void* decode_frames(LPDecContext* context)
 
 				if (context->sws_rgb_scale == NULL) {
 					context->sws_rgb_scale = sws_getContext(context->readframe->width, context->readframe->height, 
-						context->readframe->format,320, 270, AV_PIX_FMT_RGB24,
-						SWS_BILINEAR, NULL, NULL, NULL);
-
-					context->swscaleframe = av_frame_alloc();
-					if (!context->swscaleframe)
-						return AVERROR(ENOMEM);
-
-					context->swscaleframe->format = AV_PIX_FMT_RGB24;
-					context->swscaleframe->width = 320;
-					context->swscaleframe->height = 270;
-					ret = av_frame_get_buffer(context->swscaleframe, 0);
-					if (ret < 0) {
-						av_frame_free(&context->swscaleframe);
-						return ret;
-					}
+						context->readframe->format, context->normalw, context->normalh, AV_PIX_FMT_BGR24,
+						SWS_BILINEAR, NULL, NULL, NULL);					
 				}
 				//check timestamp and add frame buffer
-				if (context->framenum % 10 == 0) {
-					sws_scale(context->sws_rgb_scale, (const uint8_t **)context->readframe->data, context->readframe->linesize,
-						0, context->readframe->height, (uint8_t * const*)(&context->swscaleframe->data),
-						context->swscaleframe->linesize);
+				index = -1;
+				
+				for ( i = 0; i < context->samplecount; i++){
+					diffpts = fabs(context->framestamps[i] - packet.pts * av_q2d(context->vstream->time_base));
+
+					if (diffpts < tolerence) {
+						index = i; break;
+					}
 				}
+				//add frame in list
+				if (i >= 0 &&  i < context->samplecount && context->framediffps[i] > diffpts) {
+					context->framediffps[i] = diffpts;
+
+					if (context->listfrmame[i] != NULL) av_frame_free(&context->listfrmame[i]);
+
+					ptmpframe = av_frame_alloc();
+					if (!ptmpframe)
+						return AVERROR(ENOMEM);
+
+					ptmpframe->format = AV_PIX_FMT_RGB24;
+					ptmpframe->width = context->normalw;
+					ptmpframe->height = context->normalh;
+					ret = av_frame_get_buffer(ptmpframe, 0);
+					if (ret < 0) {
+						av_frame_free(&ptmpframe);
+						return AVERROR(ENOMEM);
+					}
+					sws_scale(context->sws_rgb_scale, (const uint8_t **)context->readframe->data, context->readframe->linesize,
+						0, context->readframe->height, (uint8_t * const*)(&ptmpframe->data),
+						ptmpframe->linesize);
+
+					context->listfrmame[i] = ptmpframe;
+				}				
 			}
 
 			av_frame_unref(context->readframe);
 		}
 
-		//audio decoding
+		//audio process
 		if (context->audio_stream == packet.stream_index) {
 
+			//check timestamp and add audio packet
+			index = -1;
+			for (i = 0; i < context->samplecount; i++) {
+				diffpts = fabs(context->audiodiffps[i] - packet.pts * av_q2d(context->astream->time_base));
+				if (diffpts < tolerence) {
+					index = i; break;
+				}
+			}
+			//add frame in list
+			if (i >= 0 && i < context->samplecount && context->audiodiffps[i] > diffpts) {
+				context->audiodiffps[i] = diffpts;
+
+				if (context->listaudio[i] != NULL) av_packet_free(&context->listaudio[i]);
+
+				context->listaudio[i] = av_packet_clone(&packet);
+				if (context->listaudio[i])
+					return AVERROR(ENOMEM);
+			}
 		}
 
 		av_packet_unref(&packet);
@@ -179,7 +259,7 @@ void* decode_frames(LPDecContext* context)
 
 int grab_allframes(LPDecContext* pcontext, int ncount)
 {
-	if (pcontext == NULL || pcontext->alivevideo == 0 || ncount <= 1)
+	if (pcontext == NULL || pcontext->alivevideo == 0 || ncount <= 1 || pcontext->samplecount <= 0)
 		return LP_FAIL;
 	int i , j, tmp;
 	LPDecContext* tmpcontext;
@@ -188,6 +268,8 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 
 	pcontext->frameindexs = (int*)malloc(sizeof(int) * pcontext->samplecount);
 	pcontext->framestamps = (double*)malloc(sizeof(double) * pcontext->samplecount);
+	pcontext->framediffps = (double*)malloc(sizeof(double) * pcontext->samplecount);
+	pcontext->audiodiffps = (double*)malloc(sizeof(double) * pcontext->samplecount);
 	
 	//intializes random number generator and generate randomize frame indexs
 	srand((unsigned)time(&t));	
@@ -206,28 +288,39 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 	}	
 	for (i = 0; i < pcontext->samplecount; i++) {
 		pcontext->framestamps[i] = pcontext->frameindexs[i] / pcontext->fps;
+		pcontext->framediffps[i] = 10000;
+		pcontext->audiodiffps[i] = 10000;
 	}
 	for (i = 1; i < ncount; i++) {
 		tmpcontext = pcontext + i;
 		tmpcontext->frameindexs = (int*)malloc(sizeof(int) * pcontext->samplecount);
 		tmpcontext->framestamps = (double*)malloc(sizeof(double) * pcontext->samplecount);
+		tmpcontext->framediffps = (double*)malloc(sizeof(double) * pcontext->samplecount);
+		tmpcontext->audiodiffps = (double*)malloc(sizeof(double) * pcontext->samplecount);
 		memcpy(tmpcontext->frameindexs, pcontext->frameindexs, sizeof(int) * pcontext->samplecount);
 		memcpy(tmpcontext->framestamps, pcontext->framestamps, sizeof(double) * pcontext->samplecount);
+		memcpy(tmpcontext->framediffps, pcontext->framediffps, sizeof(double) * pcontext->samplecount);
+		memcpy(tmpcontext->audiodiffps, pcontext->audiodiffps, sizeof(double) * pcontext->samplecount);
 	}
 	
-	//self.sample_timestamps = self.sample_indexes * 1.0 / graber.capture.fps
-
 	//run grabber thread , here grabber all frames based on time
+#if 0
+	for (i = 0; i < ncount; i++) {
+		decode_frames(&pcontext[i]);
+	}
+#else
 	for (i = 0; i < ncount; i++) {
 		if (pthread_create(&threads[i], NULL, decode_frames, (void *)&pcontext[i])) {
 			fprintf(stderr, "Error create thread id %d\n", i);
 		}
 	}
+
 	for (i = 0; i < ncount; i++) {
 		if (pthread_join(threads[i], NULL)) {
 			fprintf(stderr, "Error joining thread id %d\n", i);
 		}
 	}
+#endif
 
 	return LP_OK;
 }
@@ -250,16 +343,16 @@ int pre_verify(LPDecContext* pcontext, int renditions)
 
 int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int samplenum)
 {
-	if (srcpath == NULL || renditions == NULL || featurelist == NULL)
+	if (srcpath == NULL || renditions == NULL /*|| featurelist == NULL*/)
 		return LP_ERROR_NULL_POINT;
-	if(samplenum <= 0 || samplenum > MAX_NUM_SAMPLES)
+	if(samplenum <= 0 || samplenum >= MAX_NUM_SAMPLES)
 		return LP_ERROR_INVALID_PARAM;
 
 	
 	int ret, i , nvideonum, featureconut;
 	
 	LPDecContext* pcontext = NULL;
-	LPDecContext* masterctx = NULL;
+	LPDecContext* ptmpcontext = NULL;
 
 	//parser renditions url & featurelist
 	nvideonum = 2;
@@ -267,24 +360,55 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 
 	//create context and read	
 	pcontext = (LPDecContext*)malloc(sizeof(LPDecContext) * nvideonum);
+	memset(pcontext, 0x00, sizeof(LPDecContext) * nvideonum);
 
 	strcpy(pcontext[0].path, srcpath);
 	strcpy(pcontext[1].path, renditions);
 
 	for (i = 0; i < nvideonum; i++) {
-		ret = open_context(pcontext + i);
+		ptmpcontext = pcontext + i;
+		ptmpcontext->audio_stream = -1;
+		ptmpcontext->video_stream = -1;
+		ptmpcontext->samplecount = samplenum;
+
+		ret = open_context(ptmpcontext);		
 		if (ret != LP_OK) break;
+
 	}	
 	//pre verify with metadata
 	pre_verify(pcontext, nvideonum - 1);
 	//grab all frames for compare
 	grab_allframes(pcontext, nvideonum);
 
+#if 0 //def 	_DEBUG
+	for (i = 0; i < nvideonum; i++) {
+		LPDecContext* ptmpcontext = pcontext + i;
+		char tmppath[MAX_PATH] = { 0, };
+		uint8_t *pbuffer = (uint8_t*)malloc(sizeof(uint8_t) * ptmpcontext->normalh * ptmpcontext->normalw* 3);
+		for ( int j = 0; j < ptmpcontext->samplecount;  j++)
+		{
+			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] != NULL) {
+				//get rgb bugffer
+				uint8_t *src = (uint8_t*)ptmpcontext->listfrmame[j]->data[0];
+				memcpy(pbuffer, src, ptmpcontext->normalh * ptmpcontext->normalw * 3 * sizeof(uint8_t));
+
+				sprintf(tmppath, "D:/tmp/%02d_%02d.bmp", i, j);
+				WriteColorBmp(tmppath, ptmpcontext->normalw, ptmpcontext->normalh, pbuffer);
+			}
+			if (ptmpcontext->aliveaudio) {
+
+			}
+		}
+		if (pbuffer) free(pbuffer);
+	}
+#endif
+
 	//calculate features and matrix
 
 	//aggregate matrix
 	
 	//make and return float matrix
+	//matirx column is [tamper, audiodiff, dct, gusdiff, ... ] 2+featurecount
 
 	for (i = 0; i < nvideonum; i++) {
 		release_context(pcontext + i);

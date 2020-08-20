@@ -51,8 +51,7 @@ typedef struct LPDecContext {
 	AVStream			*astream;
 
 	struct SwsContext   *sws_rgb_scale;
-	struct AVFrame		*readframe;
-	struct AVFrame      *swscaleframe;
+	struct AVFrame		*readframe;	
 	int                 framenum;
 
 	//simple metadata for video
@@ -67,7 +66,10 @@ typedef struct LPDecContext {
 	int					aliveaudio;
 	int					channels;
 	float				samplerate;
-	
+
+	//normalize width & height
+	int					normalw;
+	int					normalh;
 
 	// for calculate compare matrix
 	int					master;
@@ -78,9 +80,10 @@ typedef struct LPDecContext {
 	int					*frameindexs;
 	double				*framestamps;
 	double				*framediffps;
+	double				*audiodiffps;
 
-	uint8_t				**frmamelist;
-	AVPacket			**audiolist;
+	AVFrame				**listfrmame;
+	AVPacket			**listaudio;
 
 } LPDecContext;
 

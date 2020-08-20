@@ -9,8 +9,13 @@
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
 #include "extractfts.h"
+#include "calcmatrix.h"
 
 #define _TEST_MODULE
+
+#ifdef _TEST_MODULE
+#include "bmpio.h"
+#endif // DEBUG
 
 #ifndef _TEST_MODULE
 #include <Python.h>
@@ -971,9 +976,7 @@ void normalshortscale(short *src, int srcw, int srch, float *dst, int dsw, int d
 		}
 	}
 }
-#ifdef _TEST_MODULE
-#include "bmpio.h"
-#endif // DEBUG
+
 
 #ifdef _TEST_MODULE
 static int loadft(const char* fname, int gopidx, int framenum, int present, int tw, int th)
@@ -1366,18 +1369,23 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 int main(int argc, char **argv)
 {
     int ret = 0;
+	int gop_count, frame_count;
     AVPacket pkt = { 0 };
+	char* renditions = NULL;
+	char* featurelist = NULL;	
 
-    if (argc != 2) {
+    if (argc < 2) {
         fprintf(stderr, "Usage: %s <video>\n", argv[0]);
         exit(1);
     }
+
     src_filename = argv[1];
-
-
-	int gop_count, frame_count;
 	filename = src_filename;
 
+	if (argc > 2)
+		renditions = argv[2];
+	if (argc > 3)
+		featurelist = argv[3];
 #if 0
 	float bitrate, qpi;
 
@@ -1396,16 +1404,28 @@ int main(int argc, char **argv)
 	count_frames(&gop_count, &frame_count);
 
 	printf("gopnum = %d frame = %d .\n", gop_count, frame_count);
-#endif
-
 
 	//loadft(src_filename, 0, 5, GOTMB, NORMALW, NORMALH);	
-	
+
 	for (size_t i = 0; i < 20; i++)
 	{
 		loadft(src_filename, 0, i, GOTDC, 480, 270);
 	}
-	
+	loadft(src_filename, 0, 0, GOTFM, 480, 270);
+
+#endif	
+		
+
+	clock_t begin = clock();
+	int ntestcount = 1;
+
+	for (int i = 0; i < ntestcount; i++) {
+		calc_featurediff(src_filename, renditions, featurelist, 10);
+	}
+
+	clock_t end = clock();
+	double time_spent = (double)(end - begin) / ntestcount / CLOCKS_PER_SEC;
+	printf("utime = %lf\n\n", time_spent);
 
 	return 0;
 }
