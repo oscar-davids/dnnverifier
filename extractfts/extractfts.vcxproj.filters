@@ -15,13 +15,13 @@
     </Filter>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="extractfts.c">
+    <ClCompile Include="extractfts.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="bmpio.c">
+    <ClCompile Include="calcmatrix.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
-    <ClCompile Include="calcmatrix.c">
+    <ClCompile Include="bmpio.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
   </ItemGroup>
@@ -62,5 +62,8 @@
     <ClInclude Include="wininclude\pthread.h">
       <Filter>Header Files</Filter>
     </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="setup.py" />
   </ItemGroup>
 </Project>

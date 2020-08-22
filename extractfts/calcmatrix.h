@@ -1,11 +1,26 @@
 #ifndef _CALC_MATRIX_H
 #define _CALC_MATRIX_H
 
+#ifdef __cplusplus
+
+#include "opencv2/imgproc.hpp"
+#include "opencv2/imgcodecs.hpp"
+#include "opencv2/highgui.hpp"
+#include "opencv2/core/utility.hpp"
+#define  __OPENCV_
+
+extern "C" {
+#endif
+
 #include <libavutil/motion_vector.h>
 #include <libavformat/avformat.h>
 #include <libavutil/pixfmt.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
+
+#ifdef __cplusplus
+	}
+#endif
 
 #ifndef NULL
 #define NULL 0
@@ -35,6 +50,16 @@ typedef enum errorType {
 	LP_ERROR_MAX,
 } errorType;
 
+typedef enum featureType {
+	LP_FT_DCT = 0,
+	LP_FT_GAUSSIAN_MSE,
+	LP_FT_GAUSSIAN_DIFF,
+	LP_FT_GAUSSIAN_TH_DIFF,
+	LP_FT_HISTOGRAM_DISTANCE,
+	LP_FT_FEATURE_MAX,
+} featureType;
+
+
 // define structure
 typedef struct LPDecContext {
 	//Video decode
@@ -58,14 +83,14 @@ typedef struct LPDecContext {
 	int					alivevideo;
 	int					width;
 	int					height;
-	int					framecount;
-	float				duration;
-	float				fps;
+	int64_t				framecount;
+	double				duration;
+	double				fps;
 	float				bitrate;
 	//simple metadata for audio
 	int					aliveaudio;
 	int					channels;
-	float				samplerate;
+	int					samplerate;
 
 	//normalize width & height
 	int					normalw;
@@ -82,8 +107,10 @@ typedef struct LPDecContext {
 	double				*framediffps;
 	double				*audiodiffps;
 
-	AVFrame				**listfrmame;
+	//AVFrame				**listfrmame;
+	void				**listfrmame;
 	AVPacket			**listaudio;
+	double				*ftmatrix;
 
 } LPDecContext;
 

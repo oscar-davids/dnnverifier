@@ -2,12 +2,21 @@
 
  * THE SOFTWARE.
  */
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 #include <libavutil/motion_vector.h>
 #include <libavformat/avformat.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/imgutils.h>	
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
+	
+#ifdef __cplusplus
+}
+#endif
+
 #include "extractfts.h"
 #include "calcmatrix.h"
 
@@ -135,31 +144,31 @@ void backcount_frames(int* gop_count, int* frame_count) {
 	// pCodec = avcodec_find_decoder(AV_CODEC_ID_H264);  
 	if (!pCodec) {
 		printf("Codec not found\n");
-		return -1;
+		return;
 	}
 	pCodecCtx = avcodec_alloc_context3(pCodec);
 	if (!pCodecCtx) {
 		printf("Could not allocate video codec context\n");
-		return -1;
+		return;
 	}
 
 	pCodecParserCtx = av_parser_init(AV_CODEC_ID_MPEG4);
 	// pCodecParserCtx=av_parser_init(AV_CODEC_ID_H264);  
 	if (!pCodecParserCtx) {
 		printf("Could not allocate video parser context\n");
-		return -1;
+		return;
 	}
 
 	if (avcodec_open2(pCodecCtx, pCodec, NULL) < 0) {
 		printf("Could not open codec\n");
-		return -1;
+		return;
 	}
 
 	//Input File  
 	fp_in = fopen(filename, "rb");
 	if (!fp_in) {
 		printf("Could not open input stream\n");
-		return -1;
+		return;
 	}
 
 	*gop_count = 0;
@@ -200,7 +209,7 @@ void backcount_frames(int* gop_count, int* frame_count) {
 	avcodec_close(pCodecCtx);
 	av_free(pCodecCtx);
 
-	return 0;
+	return;
 }
 
 int count_frames(int* gop_count, int* frame_count)
@@ -261,7 +270,7 @@ int count_frames(int* gop_count, int* frame_count)
 			//ret = decode_packet(&pkt);
 			ret = avcodec_send_packet(dx, &pkt);
 			if (ret < 0) {
-				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				fprintf(stderr, "Error while sending a packet to the decoder\n");
 				return ret;
 			}
 
@@ -272,7 +281,7 @@ int count_frames(int* gop_count, int* frame_count)
 					break;
 				}
 				else if (ret < 0) {
-					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+					fprintf(stderr, "Error while receiving a frame from the decoder\n");
 					return ret;
 				}
 				if (frame->pict_type == AV_PICTURE_TYPE_I) {
@@ -541,7 +550,7 @@ int calc_bitrate_qpi(float *fbitrate, float* fqp1)
 			//ret = decode_packet(&pkt);
 			ret = avcodec_send_packet(dx, &pkt);
 			if (ret < 0) {
-				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				fprintf(stderr, "Error while sending a packet to the decoder\n" );
 				return ret;
 			}
 
@@ -552,7 +561,7 @@ int calc_bitrate_qpi(float *fbitrate, float* fqp1)
 					break;
 				}
 				else if (ret < 0) {
-					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+					fprintf(stderr, "Error while receiving a frame from the decoder\n");
 					return ret;
 				}
 				if (frame->pict_type == AV_PICTURE_TYPE_I) {
@@ -610,7 +619,7 @@ static int decode_packet(const AVPacket *pkt)
 {
 	int ret = avcodec_send_packet(video_dec_ctx, pkt);
 	if (ret < 0) {
-		fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+		fprintf(stderr, "Error while sending a packet to the decoder\n");
 		return ret;
 	}
 
@@ -620,7 +629,7 @@ static int decode_packet(const AVPacket *pkt)
 			break;
 		}
 		else if (ret < 0) {
-			fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+			fprintf(stderr, "Error while receiving a frame from the decoder\n");
 			return ret;
 		}
 
@@ -639,10 +648,11 @@ static int decode_packet(const AVPacket *pkt)
 				const AVMotionVector *mvs = (const AVMotionVector *)sd->data;
 				for (i = 0; i < sd->size / sizeof(*mvs); i++) {
 					const AVMotionVector *mv = &mvs[i];
-					printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
+					/*printf("%d,%2d,%2d,%2d,%4d,%4d,%4d,%4d,0x%"PRIx64"\n",
 						video_frame_count, mv->source,
 						mv->w, mv->h, mv->src_x, mv->src_y,
 						mv->dst_x, mv->dst_y, mv->flags);
+					*/
 				}
 			}
 			av_frame_unref(frame);
@@ -670,7 +680,7 @@ int decode_videowithffmpeg(
 	AVFrame *pFrameBGR = NULL;
 	int *accu_src = NULL;
 	int *accu_src_old = NULL;
-	int nsuccess = 0;
+	int nsuccess = 0;	
 
 	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
 
@@ -690,21 +700,24 @@ int decode_videowithffmpeg(
 	if (!video_stream) {
 		fprintf(stderr, "Could not find video stream in the input, aborting\n");
 		ret = 1;
-		goto end;
+		//goto end;
+		return -1;
 	}
 
 	frame = av_frame_alloc();
 	if (!frame) {
 		fprintf(stderr, "Could not allocate frame\n");
 		ret = AVERROR(ENOMEM);
-		goto end;
+		//goto end;
+		return -1;
 	}
 
 	pFrameBGR = av_frame_alloc();
 	if (!pFrameBGR) {
 		fprintf(stderr, "Could not allocate frame\n");
 		ret = AVERROR(ENOMEM);
-		goto end;
+		//goto end;
+		return -1;
 	}
 		
 	int cur_gop = -1;
@@ -717,7 +730,7 @@ int decode_videowithffmpeg(
 
 			ret = avcodec_send_packet(video_dec_ctx, &pkt);
 			if (ret < 0) {
-				fprintf(stderr, "Error while sending a packet to the decoder: %s\n", av_err2str(ret));
+				fprintf(stderr, "Error while sending a packet to the decoder\n");
 				return ret;
 			}
 			while (ret >= 0) {
@@ -727,7 +740,7 @@ int decode_videowithffmpeg(
 					break;
 				}
 				else if (ret < 0) {
-					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
+					fprintf(stderr, "Error while receiving a frame from the decoder\n");
 					return ret;
 				}
 				if (frame->pict_type == AV_PICTURE_TYPE_I) {
@@ -997,7 +1010,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 	destw = tw;
 	desth = th;
 #else
-	PyArrayObject *final_arr = NULL;	
+	PyArrayObject *final_arr = NULL;
 	if (!PyArg_ParseTuple(args, "siiiii", &filename,
 		&gop_target, &pos_target, &representation, &destw , &desth)) return NULL;
 #endif
@@ -1015,7 +1028,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 
 	if (decode_videowithffmpeg(filename, gop_target, pos_target,
 #if EXTRACT_DCT
-		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr, &dct_arr,
+		(void**)&bgr_arr, (void**)&mb_arr, (void**)&qp_arr, (void**)&mv_arr, (void**)&res_arr, (void**)&dct_arr,
 #else
 		&bgr_arr, &mb_arr, &qp_arr, &mv_arr, &res_arr,
 #endif
@@ -1026,7 +1039,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 #ifdef _TEST_MODULE
 		return ret;
 #else
-		return final_arr;
+		return (PyObject*)final_arr;
 #endif
 	}
 
@@ -1101,7 +1114,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 #if EXTRACT_DCT
 		if (representation == GOTDC)
 		{
-			normalshortscale(dct_arr, szInfo.w, szInfo.h, fnormal, destw, desth, szInfo.repeat);
+			normalshortscale((short*)dct_arr, szInfo.w, szInfo.h, fnormal, destw, desth, szInfo.repeat);
 		}
 #endif
 
@@ -1123,7 +1136,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 		npy_intp dims[2];
 		dims[0] = desth * destw;
 		dims[1] = 1;		
-		final_arr = PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);
+		final_arr = (PyArrayObject*)PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);		
 
 		int buffersize = desth * destw  * sizeof(float);
 		memcpy(final_arr->data, fnormal, buffersize);
@@ -1144,7 +1157,7 @@ static PyObject *loadft(PyObject *self, PyObject *args)
 #ifdef _TEST_MODULE	
 	return ret;
 #else
-	return final_arr;
+	return PyArray_Return(final_arr);
 #endif	
 }
 
@@ -1237,7 +1250,7 @@ static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 	
 #ifdef Py_PYTHON_H
 	npy_intp dims = 2;
-	final_arr = PyArray_ZEROS(1, &dims, PyArray_FLOAT, 0);
+	final_arr = (PyArrayObject*)PyArray_ZEROS(1, &dims, PyArray_FLOAT, 0);
 	final_arr->data[0] = bitrate;
 	final_arr->data[1] = qp1;
 #endif
@@ -1246,7 +1259,8 @@ static PyObject *get_bitrate_qpi(PyObject *self, PyObject *args)
 	ret = 0;
 	return ret;
 #else
-	return final_arr;
+	
+	return PyArray_Return(final_arr);
 #endif
 }
 
@@ -1315,7 +1329,7 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 		return ret;
 	}
 
-	AVBitStreamFilter *bsf = av_bsf_get_by_name("h264_mp4toannexb");
+	AVBitStreamFilter *bsf = (AVBitStreamFilter*)av_bsf_get_by_name("h264_mp4toannexb");
 	AVBSFContext *bsfctx = NULL;
 	if ((ret = av_bsf_alloc(bsf, &bsfctx)))
 		return ret;
@@ -1420,7 +1434,7 @@ int main(int argc, char **argv)
 	int ntestcount = 1;
 
 	for (int i = 0; i < ntestcount; i++) {
-		calc_featurediff(src_filename, renditions, featurelist, 10);
+		calc_featurediff((char*)src_filename, renditions, featurelist, 10);
 	}
 
 	clock_t end = clock();

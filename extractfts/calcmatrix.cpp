@@ -9,6 +9,8 @@
 #include "bmpio.h"
 #endif
 
+using namespace cv;
+
 #define MAX_NUM_THREADS 11	//master + rendition 10 at same time
 #define MAX_NUM_SAMPLES 50	//sample count for compare
 
@@ -108,14 +110,19 @@ void release_context(LPDecContext* lpcontext)
 	//release frame and audio array
 	for (int i = 0; i < lpcontext->samplecount; i++)
 	{
+#ifndef __OPENCV_
 		if (lpcontext->alivevideo && lpcontext->listfrmame[i])
-			av_frame_free(&lpcontext->listfrmame[i]);
+			av_frame_free(&(AVFrame*)lpcontext->listfrmame[i]);
+#endif // !__OPENCV_
+
+		
 
 		if (lpcontext->aliveaudio && lpcontext->listaudio[i])
 			av_packet_unref(lpcontext->listaudio[i]);
 	}
 	if (lpcontext->listfrmame) free(lpcontext->listfrmame);
 	if (lpcontext->listaudio) free(lpcontext->listaudio);
+	if (lpcontext->ftmatrix) free(lpcontext->ftmatrix);
 	
 	//release media context
 	if (lpcontext->sws_rgb_scale)
@@ -130,10 +137,12 @@ void release_context(LPDecContext* lpcontext)
 	avformat_close_input(&lpcontext->input_ctx);
 }
 
-void* decode_frames(LPDecContext* context)
+void* decode_frames(void* parg)
 {
+	LPDecContext* context = (LPDecContext*)parg;
+
 	if (context == NULL || (context->vcontext == NULL && context->acontext == NULL)) 
-		return LP_ERROR_NULL_POINT;
+		return NULL;
 	
 	int ret = 0;	
 	int i, got_frame, index;
@@ -144,8 +153,8 @@ void* decode_frames(LPDecContext* context)
 	
 	context->readframe = av_frame_alloc();
 	if (context->alivevideo) {
-		context->listfrmame = (AVFrame**)malloc(sizeof(AVFrame*)*context->samplecount);
-		memset(context->listfrmame, 0x00, sizeof(AVFrame*)*context->samplecount);
+		context->listfrmame = (void**)malloc(sizeof(void*)*context->samplecount);
+		memset(context->listfrmame, 0x00, sizeof(void*)*context->samplecount);
 	}
 	if (context->aliveaudio) {
 		context->listaudio = (AVPacket**)malloc(sizeof(AVPacket*)*context->samplecount);
@@ -165,7 +174,7 @@ void* decode_frames(LPDecContext* context)
 		
 			ret = avcodec_send_packet(context->vcontext, &packet);
 			if (ret < 0 && ret != AVERROR_EOF)
-				return ret;
+				return NULL;
 		
 			while (ret >= 0) {
 				ret = avcodec_receive_frame(context->vcontext, context->readframe);
@@ -173,8 +182,8 @@ void* decode_frames(LPDecContext* context)
 					ret = 0;
 					break;
 				} else if (ret < 0) {
-					fprintf(stderr, "Error while receiving a frame from the decoder: %s\n", av_err2str(ret));
-					return ret;
+					fprintf(stderr, "Error while receiving a frame from the decoder\n");					
+					return NULL;
 				}
 				if (context->readframe->pict_type == AV_PICTURE_TYPE_I) {					
 				}				
@@ -182,7 +191,7 @@ void* decode_frames(LPDecContext* context)
 
 				if (context->sws_rgb_scale == NULL) {
 					context->sws_rgb_scale = sws_getContext(context->readframe->width, context->readframe->height, 
-						context->readframe->format, context->normalw, context->normalh, AV_PIX_FMT_BGR24,
+						(AVPixelFormat)context->readframe->format, context->normalw, context->normalh, AV_PIX_FMT_BGR24,
 						SWS_BILINEAR, NULL, NULL, NULL);					
 				}
 				//check timestamp and add frame buffer
@@ -198,12 +207,15 @@ void* decode_frames(LPDecContext* context)
 				//add frame in list
 				if (i >= 0 &&  i < context->samplecount && context->framediffps[i] > diffpts) {
 					context->framediffps[i] = diffpts;
-
-					if (context->listfrmame[i] != NULL) av_frame_free(&context->listfrmame[i]);
+#ifndef __OPENCV_
+					if (context->listfrmame[i] != NULL) av_frame_free(&(AVFrame*)context->listfrmame[i]);
+#else
+					if (context->listfrmame[i] != NULL) delete (Mat*)context->listfrmame[i];
+#endif
 
 					ptmpframe = av_frame_alloc();
 					if (!ptmpframe)
-						return AVERROR(ENOMEM);
+						return NULL;
 
 					ptmpframe->format = AV_PIX_FMT_RGB24;
 					ptmpframe->width = context->normalw;
@@ -211,13 +223,19 @@ void* decode_frames(LPDecContext* context)
 					ret = av_frame_get_buffer(ptmpframe, 0);
 					if (ret < 0) {
 						av_frame_free(&ptmpframe);
-						return AVERROR(ENOMEM);
+						return NULL;
 					}
 					sws_scale(context->sws_rgb_scale, (const uint8_t **)context->readframe->data, context->readframe->linesize,
 						0, context->readframe->height, (uint8_t * const*)(&ptmpframe->data),
 						ptmpframe->linesize);
-
-					context->listfrmame[i] = ptmpframe;
+#ifndef __OPENCV_					
+					context->listfrmame[i] = (void*)ptmpframe;
+#else
+					
+					context->listfrmame[i] = (void*)new Mat(context->normalh, context->normalh, CV_8UC3, ptmpframe->data[0]);
+					av_frame_free(&ptmpframe);
+#endif
+					
 				}				
 			}
 
@@ -243,7 +261,7 @@ void* decode_frames(LPDecContext* context)
 
 				context->listaudio[i] = av_packet_clone(&packet);
 				if (context->listaudio[i])
-					return AVERROR(ENOMEM);
+					return NULL;
 			}
 		}
 
@@ -254,7 +272,7 @@ void* decode_frames(LPDecContext* context)
 	if (context->readframe)
 		av_frame_free(&context->readframe);
 
-	return LP_OK;
+	return NULL;
 }
 
 int grab_allframes(LPDecContext* pcontext, int ncount)
@@ -341,6 +359,57 @@ int pre_verify(LPDecContext* pcontext, int renditions)
 	return LP_OK;
 }
 
+int calc_framediff(LPDecContext* pctxmaster, LPDecContext* pctxrendition, int index)
+{
+	if (pctxmaster == NULL || pctxrendition == NULL /*|| featurelist == NULL*/)
+		return LP_ERROR_NULL_POINT;
+
+	//LP_FT_DCT, LP_FT_GAUSSIAN_MSE, LP_FT_GAUSSIAN_DIFF, LP_FT_GAUSSIAN_TH_DIFF, LP_FT_HISTOGRAM_DISTANCE
+	Mat reference_frame_v, rendition_frame_v, next_reference_frame_v, next_rendition_frame_v;
+	cvtColor(*((Mat*)pctxmaster->listfrmame[index]), reference_frame_v, COLOR_BGR2HSV);
+	cvtColor(*((Mat*)pctxrendition->listfrmame[index]), rendition_frame_v, COLOR_BGR2HSV);
+	cvtColor(*((Mat*)pctxmaster->listfrmame[index+1]), next_reference_frame_v, COLOR_BGR2HSV);
+	cvtColor(*((Mat*)pctxrendition->listfrmame[index+1]), next_rendition_frame_v, COLOR_BGR2HSV);
+
+	extractChannel(reference_frame_v, reference_frame_v, 2);
+	extractChannel(rendition_frame_v, rendition_frame_v, 2);
+	extractChannel(next_reference_frame_v, next_reference_frame_v, 2);
+	extractChannel(next_rendition_frame_v, next_rendition_frame_v, 2);
+
+	double* pout = pctxrendition->ftmatrix + (int)LP_FT_FEATURE_MAX * index;
+
+	for (int i = 0; i < LP_FT_FEATURE_MAX; i++)
+	{
+		switch (i)
+		{
+		case LP_FT_DCT:
+			break;
+		case LP_FT_GAUSSIAN_MSE:
+			break;
+		case LP_FT_GAUSSIAN_DIFF:
+			break;
+		case LP_FT_GAUSSIAN_TH_DIFF:
+			break;
+		case LP_FT_HISTOGRAM_DISTANCE:
+			break;		
+		default:
+			break;
+		}
+	}
+
+	return LP_OK;
+}
+int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
+{
+	//make reature matrix(feature * samplecount)
+	pctxrendition->ftmatrix = (double*)malloc(sizeof(double) * 5 * pctxrendition->samplecount);
+	for (int i = 0; i < pctxrendition->samplecount-1; i++)
+	{	
+		calc_framediff(pctxmaster, pctxrendition, i);
+	}
+	return LP_OK;
+}
+
 int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int samplenum)
 {
 	if (srcpath == NULL || renditions == NULL /*|| featurelist == NULL*/)
@@ -349,7 +418,7 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 		return LP_ERROR_INVALID_PARAM;
 
 	
-	int ret, i , nvideonum, featureconut;
+	int ret, i, j, nvideonum, featureconut;
 	
 	LPDecContext* pcontext = NULL;
 	LPDecContext* ptmpcontext = NULL;
@@ -404,11 +473,27 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 #endif
 
 	//calculate features and matrix
+	//matirx column is [tamper, audiodiff, dct, gusdiff, ... ] 2+featurecount
+	// create matrix for calculation
+	//first compare audio buffer
+	if (pcontext->aliveaudio) {
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			for (j = 0; j < pcontext->samplecount; j++) {
+				memcmp(pcontext->listaudio[i]->data, ptmpcontext->listaudio[i]->data, pcontext->listaudio[i]->size);
+				//set matrix value
+			}
+		}
+	}
+	//calculate vframe matrix
+	if (pcontext->alivevideo) {
+
+	}
 
 	//aggregate matrix
 	
 	//make and return float matrix
-	//matirx column is [tamper, audiodiff, dct, gusdiff, ... ] 2+featurecount
+	
 
 	for (i = 0; i < nvideonum; i++) {
 		release_context(pcontext + i);

@@ -19,9 +19,9 @@
     </ProjectConfiguration>
   </ItemGroup>
   <ItemGroup>
-    <ClCompile Include="bmpio.c" />
-    <ClCompile Include="calcmatrix.c" />
-    <ClCompile Include="extractfts.c" />
+    <ClCompile Include="bmpio.cpp" />
+    <ClCompile Include="calcmatrix.cpp" />
+    <ClCompile Include="extractfts.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bmpio.h" />
@@ -36,6 +36,9 @@
     <ClInclude Include="qpeldsp.h" />
     <ClInclude Include="videodsp.h" />
     <ClInclude Include="wininclude\pthread.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="setup.py" />
   </ItemGroup>
   <PropertyGroup Label="Globals">
     <VCProjectVersion>15.0</VCProjectVersion>
@@ -111,13 +114,13 @@
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>./ffmpeg-4.2.1/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./ffmpeg-4.2.1/include;./opencv4.2.0/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalLibraryDirectories>./ffmpeg-4.2.1/lib</AdditionalLibraryDirectories>
-      <AdditionalDependencies>avcodec.lib;avutil.lib;avformat.lib;swscale.lib;avdevice.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>./ffmpeg-4.2.1/lib;./opencv4.2.0/x64/vc15/lib</AdditionalLibraryDirectories>
+      <AdditionalDependencies>avcodec.lib;avutil.lib;avformat.lib;swscale.lib;avdevice.lib;opencv_world420d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -143,15 +146,15 @@
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
       <ConformanceMode>true</ConformanceMode>
-      <AdditionalIncludeDirectories>./ffmpeg-4.2.1/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>./ffmpeg-4.2.1/include;./opencv4.2.0/include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
       <PreprocessorDefinitions>_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalLibraryDirectories>./ffmpeg-4.2.1/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
-      <AdditionalDependencies>avcodec.lib;avutil.lib;avformat.lib;swscale.lib;avdevice.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalLibraryDirectories>./ffmpeg-4.2.1/lib;./opencv4.2.0/x64/vc15/lib;%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
+      <AdditionalDependencies>avcodec.lib;avutil.lib;avformat.lib;swscale.lib;avdevice.lib;opencv_world420.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

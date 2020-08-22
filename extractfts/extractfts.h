@@ -1,7 +1,12 @@
 #ifndef EXTRACT_FTS_H
 #define EXTRACT_FTS_H
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 #include "libavutil/buffer.h"
+#include "libavutil/log.h"
 #include "libavutil/intreadwrite.h"
 
 #include "h264.h"
@@ -12,6 +17,10 @@
 #include "h264qpel.h"
 #include "h264_sei.h"
 #include "videodsp.h"
+
+#ifdef __cplusplus
+	}
+#endif
 
 #if defined(_MSC_VER)
 //#pragma pack(1)
@@ -787,7 +796,7 @@ typedef struct H264SliceContext {
 } H264SliceContext;
 
 typedef struct H264Context {
-	const AVClass *class;
+	const struct AVClass *pclass;
 	AVCodecContext *avctx;
 	VideoDSPContext vdsp;
 	H264DSPContext h264dsp;
