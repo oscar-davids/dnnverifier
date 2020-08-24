@@ -468,7 +468,7 @@ int calc_framediff(LPDecContext* pctxmaster, LPDecContext* pctxrendition, int in
 }
 int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 {
-	//make reature matrix(feature * samplecount)
+	//make feature matrix(feature * samplecount)
 	pctxrendition->ftmatrix = (double*)malloc(sizeof(double) * 5 * pctxrendition->samplecount);
 	for (int i = 0; i < pctxrendition->samplecount-1; i++)
 	{	
