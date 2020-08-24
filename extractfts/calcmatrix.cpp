@@ -110,12 +110,9 @@ void release_context(LPDecContext* lpcontext)
 	//release frame and audio array
 	for (int i = 0; i < lpcontext->samplecount; i++)
 	{
-#ifndef __OPENCV_
-		if (lpcontext->alivevideo && lpcontext->listfrmame[i])
-			av_frame_free(&(AVFrame*)lpcontext->listfrmame[i]);
-#endif // !__OPENCV_
 
-		
+		if (lpcontext->alivevideo && lpcontext->listfrmame[i])
+			av_frame_free(&lpcontext->listfrmame[i]);
 
 		if (lpcontext->aliveaudio && lpcontext->listaudio[i])
 			av_packet_unref(lpcontext->listaudio[i]);
@@ -153,8 +150,8 @@ void* decode_frames(void* parg)
 	
 	context->readframe = av_frame_alloc();
 	if (context->alivevideo) {
-		context->listfrmame = (void**)malloc(sizeof(void*)*context->samplecount);
-		memset(context->listfrmame, 0x00, sizeof(void*)*context->samplecount);
+		context->listfrmame = (AVFrame**)malloc(sizeof(AVFrame*)*context->samplecount);
+		memset(context->listfrmame, 0x00, sizeof(AVFrame*)*context->samplecount);
 	}
 	if (context->aliveaudio) {
 		context->listaudio = (AVPacket**)malloc(sizeof(AVPacket*)*context->samplecount);
@@ -207,12 +204,8 @@ void* decode_frames(void* parg)
 				//add frame in list
 				if (i >= 0 &&  i < context->samplecount && context->framediffps[i] > diffpts) {
 					context->framediffps[i] = diffpts;
-#ifndef __OPENCV_
-					if (context->listfrmame[i] != NULL) av_frame_free(&(AVFrame*)context->listfrmame[i]);
-#else
-					if (context->listfrmame[i] != NULL) delete (Mat*)context->listfrmame[i];
-#endif
 
+					if (context->listfrmame[i] != NULL) av_frame_free(&context->listfrmame[i]);
 					ptmpframe = av_frame_alloc();
 					if (!ptmpframe)
 						return NULL;
@@ -228,14 +221,8 @@ void* decode_frames(void* parg)
 					sws_scale(context->sws_rgb_scale, (const uint8_t **)context->readframe->data, context->readframe->linesize,
 						0, context->readframe->height, (uint8_t * const*)(&ptmpframe->data),
 						ptmpframe->linesize);
-#ifndef __OPENCV_					
-					context->listfrmame[i] = (void*)ptmpframe;
-#else
-					
-					context->listfrmame[i] = (void*)new Mat(context->normalh, context->normalh, CV_8UC3, ptmpframe->data[0]);
-					av_frame_free(&ptmpframe);
-#endif
-					
+
+					context->listfrmame[i] = ptmpframe;					
 				}				
 			}
 
@@ -363,34 +350,114 @@ int calc_framediff(LPDecContext* pctxmaster, LPDecContext* pctxrendition, int in
 {
 	if (pctxmaster == NULL || pctxrendition == NULL /*|| featurelist == NULL*/)
 		return LP_ERROR_NULL_POINT;
-
+	int x, y;
 	//LP_FT_DCT, LP_FT_GAUSSIAN_MSE, LP_FT_GAUSSIAN_DIFF, LP_FT_GAUSSIAN_TH_DIFF, LP_FT_HISTOGRAM_DISTANCE
+	Mat reference_frame, rendition_frame, next_reference_frame, next_rendition_frame;
 	Mat reference_frame_v, rendition_frame_v, next_reference_frame_v, next_rendition_frame_v;
-	cvtColor(*((Mat*)pctxmaster->listfrmame[index]), reference_frame_v, COLOR_BGR2HSV);
-	cvtColor(*((Mat*)pctxrendition->listfrmame[index]), rendition_frame_v, COLOR_BGR2HSV);
-	cvtColor(*((Mat*)pctxmaster->listfrmame[index+1]), next_reference_frame_v, COLOR_BGR2HSV);
-	cvtColor(*((Mat*)pctxrendition->listfrmame[index+1]), next_rendition_frame_v, COLOR_BGR2HSV);
+	Mat reference_frame_float, rendition_frame_float, reference_dct, rendition_dct;
+	double dmin, dmax;
+	Mat gauss_reference_frame, gauss_rendition_frame, difference_frame, threshold_frame, temporal_difference;
+	//sigma = 4
+	//gauss_reference_frame = gaussian(reference_frame_v, sigma = sigma)
+	//gauss_rendition_frame = gaussian(rendition_frame_v, sigma = sigma)
+	double dsum, difference, dmse , dabssum;
+	int width, height;
+	Scalar mean, stddev, ssum;
+	MatND hist_a, hist_b;
+	int channels[] = { 0, 1, 2 };
+	int bins[3] = { 8, 8, 8 };
+	int histSize[] = { 256, 256, 256 };
+	float h_ranges[] = { 0, 256 };
+	float s_ranges[] = { 0, 256 };
+	float v_ranges[] = { 0, 256 };
+	const float* ranges[] = { h_ranges, s_ranges, v_ranges };	
+	width = pctxmaster->normalw;
+	height = pctxmaster->normalh;
+
+	if (pctxmaster->listfrmame[index] == NULL || pctxrendition->listfrmame[index] == NULL)
+		return -1;
+
+	reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index]->data[0]);
+	rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index]->data[0]);
+	next_reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index+1]->data[0]);
+	next_rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index+1]->data[0]);
+	
+	cvtColor(reference_frame, reference_frame_v, COLOR_BGR2HSV);
+	cvtColor(rendition_frame, rendition_frame_v, COLOR_BGR2HSV);
+	cvtColor(next_reference_frame, next_reference_frame_v, COLOR_BGR2HSV);
+	cvtColor(next_rendition_frame, next_rendition_frame_v, COLOR_BGR2HSV);
 
 	extractChannel(reference_frame_v, reference_frame_v, 2);
 	extractChannel(rendition_frame_v, rendition_frame_v, 2);
 	extractChannel(next_reference_frame_v, next_reference_frame_v, 2);
 	extractChannel(next_rendition_frame_v, next_rendition_frame_v, 2);
 
+	GaussianBlur(reference_frame_v, gauss_reference_frame, Size(3, 3), 4);
+	GaussianBlur(rendition_frame_v, gauss_rendition_frame, Size(3, 3), 4);
+
+	
+	dsum = dabssum = 0.0;
 	double* pout = pctxrendition->ftmatrix + (int)LP_FT_FEATURE_MAX * index;
 
+	absdiff(gauss_reference_frame, gauss_rendition_frame, difference_frame);
+	
 	for (int i = 0; i < LP_FT_FEATURE_MAX; i++)
 	{
 		switch (i)
 		{
-		case LP_FT_DCT:
+		case LP_FT_DCT:			
+			reference_frame_v.convertTo(reference_frame_float, CV_32FC3, 1 / 255.0);
+			rendition_frame_v.convertTo(rendition_frame_float, CV_32FC3, 1 / 255.0);
+			dct(reference_frame_float, reference_dct);
+			dct(rendition_frame_float, rendition_dct);
+			minMaxIdx(reference_dct - rendition_dct,&dmin , &dmax);
+			*(pout + i) = dmax;
 			break;
-		case LP_FT_GAUSSIAN_MSE:
+		case LP_FT_GAUSSIAN_MSE:			
+			/*for (x = 0; x < width; ++x) {
+				for (y = 0; y < height; ++y) {					
+					difference = (double)gauss_reference_frame.at<float>(x, y) -gauss_rendition_frame.at<float>(x, y);
+					dsum = dsum + difference * difference;
+					dabssum = dabssum + abs(difference);
+				}
+			}
+			dmse = dsum / (width*height);//PSNR*/
+			dmse = sum(difference_frame ^ 2).val[0] / (width*height);			
+			*(pout + i) = dmse;
 			break;
 		case LP_FT_GAUSSIAN_DIFF:
+			*(pout + i) = sum(difference_frame).val[0];
 			break;
 		case LP_FT_GAUSSIAN_TH_DIFF:
+			temporal_difference = (next_reference_frame_v / 255.0) - (rendition_frame_v / 255.0);						
+			meanStdDev(temporal_difference, mean, stddev);
+			threshold(difference_frame, threshold_frame, stddev.val[0], 1, THRESH_BINARY);
+			ssum = sum(threshold_frame);
+			*(pout + i) = ssum.val[0];
 			break;
 		case LP_FT_HISTOGRAM_DISTANCE:
+				/*def histogram_distance(reference_frame, rendition_frame, eps = 1e-10)
+				bins = [8, 8, 8]
+				hist_a = cv2.calcHist([reference_frame], [0, 1, 2],
+					None, bins, [0, 256, 0, 256, 0, 256])
+				hist_a = cv2.normalize(hist_a, hist_a)
+				hist_b = cv2.calcHist([rendition_frame], [0, 1, 2],
+					None, bins, [0, 256, 0, 256, 0, 256])
+				hist_b = cv2.normalize(hist_b, hist_b)
+				# return out 3D histogram as a flattened array
+				hist_a = hist_a.flatten()
+				hist_b = hist_b.flatten()
+				# Return the chi squared distance of the histograms
+				chi_dist = 0.5 * np.sum([((a - b) ** 2) / (a + b + eps) for (a, b) in zip(hist_a, hist_b)])
+				return chi_dist
+				*/
+			calcHist(&reference_frame, 1, channels, Mat(), hist_a, 2, histSize, ranges, true, false);
+			normalize(hist_a, hist_a, 0, 1, NORM_MINMAX, -1, Mat());
+
+			calcHist(&rendition_frame, 1, channels, Mat(), hist_b, 2, histSize, ranges, true, false);
+			normalize(hist_b, hist_b, 0, 1, NORM_MINMAX, -1, Mat());
+			*(pout + i) =  compareHist(hist_a, hist_b, HISTCMP_CHISQR);
+			
 			break;		
 		default:
 			break;
@@ -449,7 +516,7 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 	//grab all frames for compare
 	grab_allframes(pcontext, nvideonum);
 
-#if 0 //def 	_DEBUG
+#ifdef 	_DEBUG
 	for (i = 0; i < nvideonum; i++) {
 		LPDecContext* ptmpcontext = pcontext + i;
 		char tmppath[MAX_PATH] = { 0, };
@@ -457,12 +524,16 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 		for ( int j = 0; j < ptmpcontext->samplecount;  j++)
 		{
 			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] != NULL) {
+				
+				sprintf(tmppath, "D:/tmp/%02d_%02d.bmp", i, j);
+#if 0 //def __OPENCV_
+				//imwrite(tmppath, *((Mat*)ptmpcontext->listfrmame[j]));
+#else
 				//get rgb bugffer
 				uint8_t *src = (uint8_t*)ptmpcontext->listfrmame[j]->data[0];
-				memcpy(pbuffer, src, ptmpcontext->normalh * ptmpcontext->normalw * 3 * sizeof(uint8_t));
-
-				sprintf(tmppath, "D:/tmp/%02d_%02d.bmp", i, j);
+				memcpy(pbuffer, src, ptmpcontext->normalh * ptmpcontext->normalw * 3 * sizeof(uint8_t));				
 				WriteColorBmp(tmppath, ptmpcontext->normalw, ptmpcontext->normalh, pbuffer);
+#endif
 			}
 			if (ptmpcontext->aliveaudio) {
 
@@ -470,10 +541,11 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 		}
 		if (pbuffer) free(pbuffer);
 	}
+
 #endif
 
 	//calculate features and matrix
-	//matirx column is [tamper, audiodiff, dct, gusdiff, ... ] 2+featurecount
+	//matirx column is [tamper, audiodiff, dct, gaussdiff, ... ] 2+featurecount
 	// create matrix for calculation
 	//first compare audio buffer
 	if (pcontext->aliveaudio) {
@@ -487,7 +559,10 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 	}
 	//calculate vframe matrix
 	if (pcontext->alivevideo) {
-
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			calc_featurematrix(pcontext, ptmpcontext);
+		}		
 	}
 
 	//aggregate matrix

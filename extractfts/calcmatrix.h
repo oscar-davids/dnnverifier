@@ -107,8 +107,8 @@ typedef struct LPDecContext {
 	double				*framediffps;
 	double				*audiodiffps;
 
-	//AVFrame				**listfrmame;
-	void				**listfrmame;
+	AVFrame				**listfrmame;
+	//void				**listfrmame;
 	AVPacket			**listaudio;
 	double				*ftmatrix;
 
