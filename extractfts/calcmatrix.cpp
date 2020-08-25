@@ -473,9 +473,11 @@ void* calc_framediff(void* pairinfo)
 }
 int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 {
+
 	int i, ncount;
 	pthread_t threads[MAX_NUM_THREADS];
-	//make reature matrix(feature * samplecount)
+	//make feature matrix(feature * samplecount)
+
 	pctxrendition->ftmatrix = (double*)malloc(sizeof(double) * 5 * pctxrendition->samplecount);
 	ncount = pctxrendition->samplecount - 1;
 	LPPair* pairinfo = (LPPair*)malloc(sizeof(LPPair) * ncount);
