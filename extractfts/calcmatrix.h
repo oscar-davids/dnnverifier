@@ -25,10 +25,14 @@ extern "C" {
 #ifndef NULL
 #define NULL 0
 #endif
+
 #ifndef MAX_PATH
 #define MAX_PATH 256
 #endif
 
+#ifndef USE_MULTI_THREAD
+#define USE_MULTI_THREAD 1
+#endif
 
 // define enum type
 /*
@@ -113,6 +117,12 @@ typedef struct LPDecContext {
 	double				*ftmatrix;
 
 } LPDecContext;
+
+typedef struct LPPair {
+	LPDecContext*	master;
+	LPDecContext*	rendition;
+	int				frameid;
+} LPPair;
 
 int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int samplenum);
 

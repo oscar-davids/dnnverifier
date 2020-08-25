@@ -11,7 +11,7 @@
 
 using namespace cv;
 
-#define MAX_NUM_THREADS 11	//master + rendition 10 at same time
+#define MAX_NUM_THREADS 16	//multithread count at same time
 #define MAX_NUM_SAMPLES 50	//sample count for compare
 
 int open_context(LPDecContext* lpcontext)
@@ -110,7 +110,6 @@ void release_context(LPDecContext* lpcontext)
 	//release frame and audio array
 	for (int i = 0; i < lpcontext->samplecount; i++)
 	{
-
 		if (lpcontext->alivevideo && lpcontext->listfrmame[i])
 			av_frame_free(&lpcontext->listfrmame[i]);
 
@@ -143,7 +142,7 @@ void* decode_frames(void* parg)
 	
 	int ret = 0;	
 	int i, got_frame, index;
-	double tolerence = 1.0 / (context->fps * 2.0);
+	double tolerance = 2.0 / context->fps;
 	double diffpts = 0.0;
 	AVPacket packet;
 	AVFrame *ptmpframe = NULL;
@@ -157,7 +156,6 @@ void* decode_frames(void* parg)
 		context->listaudio = (AVPacket**)malloc(sizeof(AVPacket*)*context->samplecount);
 		memset(context->listaudio, 0x00, sizeof(AVPacket*)*context->samplecount);
 	}
-
 
 	while (ret >= 0) {
 
@@ -197,7 +195,7 @@ void* decode_frames(void* parg)
 				for ( i = 0; i < context->samplecount; i++){
 					diffpts = fabs(context->framestamps[i] - packet.pts * av_q2d(context->vstream->time_base));
 
-					if (diffpts < tolerence) {
+					if (diffpts < tolerance) {
 						index = i; break;
 					}
 				}
@@ -236,7 +234,7 @@ void* decode_frames(void* parg)
 			index = -1;
 			for (i = 0; i < context->samplecount; i++) {
 				diffpts = fabs(context->audiodiffps[i] - packet.pts * av_q2d(context->astream->time_base));
-				if (diffpts < tolerence) {
+				if (diffpts < tolerance) {
 					index = i; break;
 				}
 			}
@@ -309,11 +307,7 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 	}
 	
 	//run grabber thread , here grabber all frames based on time
-#if 0
-	for (i = 0; i < ncount; i++) {
-		decode_frames(&pcontext[i]);
-	}
-#else
+#if USE_MULTI_THREAD
 	for (i = 0; i < ncount; i++) {
 		if (pthread_create(&threads[i], NULL, decode_frames, (void *)&pcontext[i])) {
 			fprintf(stderr, "Error create thread id %d\n", i);
@@ -324,6 +318,10 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 		if (pthread_join(threads[i], NULL)) {
 			fprintf(stderr, "Error joining thread id %d\n", i);
 		}
+	}
+#else
+	for (i = 0; i < ncount; i++) {
+		decode_frames(&pcontext[i]);
 	}
 #endif
 
@@ -346,10 +344,17 @@ int pre_verify(LPDecContext* pcontext, int renditions)
 	return LP_OK;
 }
 
-int calc_framediff(LPDecContext* pctxmaster, LPDecContext* pctxrendition, int index)
+void* calc_framediff(void* pairinfo)
 {
+	if (pairinfo == NULL) return NULL;
+
+	LPDecContext *pctxmaster, *pctxrendition;
+	int index = ((LPPair*)pairinfo)->frameid;
+	pctxmaster = ((LPPair*)pairinfo)->master;
+	pctxrendition = ((LPPair*)pairinfo)->rendition;
+
 	if (pctxmaster == NULL || pctxrendition == NULL /*|| featurelist == NULL*/)
-		return LP_ERROR_NULL_POINT;
+		return NULL;
 	int x, y;
 	//LP_FT_DCT, LP_FT_GAUSSIAN_MSE, LP_FT_GAUSSIAN_DIFF, LP_FT_GAUSSIAN_TH_DIFF, LP_FT_HISTOGRAM_DISTANCE
 	Mat reference_frame, rendition_frame, next_reference_frame, next_rendition_frame;
@@ -375,7 +380,7 @@ int calc_framediff(LPDecContext* pctxmaster, LPDecContext* pctxrendition, int in
 	height = pctxmaster->normalh;
 
 	if (pctxmaster->listfrmame[index] == NULL || pctxrendition->listfrmame[index] == NULL)
-		return -1;
+		return NULL;
 
 	reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index]->data[0]);
 	rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index]->data[0]);
@@ -464,17 +469,75 @@ int calc_framediff(LPDecContext* pctxmaster, LPDecContext* pctxrendition, int in
 		}
 	}
 
-	return LP_OK;
+	return NULL;
 }
 int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 {
+	int i, ncount;
+	pthread_t threads[MAX_NUM_THREADS];
 	//make reature matrix(feature * samplecount)
 	pctxrendition->ftmatrix = (double*)malloc(sizeof(double) * 5 * pctxrendition->samplecount);
-	for (int i = 0; i < pctxrendition->samplecount-1; i++)
-	{	
-		calc_framediff(pctxmaster, pctxrendition, i);
+	ncount = pctxrendition->samplecount - 1;
+	LPPair* pairinfo = (LPPair*)malloc(sizeof(LPPair) * ncount);
+	for ( i = 0; i < ncount; i++)
+	{
+		pairinfo[i].master = pctxmaster;
+		pairinfo[i].rendition = pctxrendition;
+		pairinfo[i].frameid = i;
 	}
+#if USE_MULTI_THREAD
+	for (i = 0; i < ncount; i++) {
+		if (pthread_create(&threads[i], NULL, calc_framediff, (void *)&pairinfo[i])) {
+			fprintf(stderr, "Error create thread id %d\n", i);
+		}
+	}
+	for (i = 0; i < ncount; i++) {
+		if (pthread_join(threads[i], NULL)) {
+			fprintf(stderr, "Error joining thread id %d\n", i);
+		}
+	}
+#else
+	for (int i = 0; i < pctxrendition->samplecount - 1; i++)
+	{
+		calc_framediff((void *)&pairinfo[i]);
+	}
+#endif
+	if(pairinfo)
+		free(pairinfo);
+
 	return LP_OK;
+}
+int aggregate_matrix(LPDecContext* pctxrendition)
+{	
+	double* pout = pctxrendition->ftmatrix;
+
+	fprintf(stderr, "aggregate(%d) :", pctxrendition->samplecount - 1);
+
+	for (int j = 0; j < LP_FT_FEATURE_MAX; j++)
+	{
+		double* poutstart = pout + j;
+		for (int i = 1; i < pctxrendition->samplecount - 1; i++)
+		{
+			*poutstart += *(poutstart + (int)LP_FT_FEATURE_MAX * i);
+		}
+
+		*poutstart = *poutstart / (pctxrendition->samplecount - 1);
+		fprintf(stderr, "%lf :", *poutstart);
+	}
+
+	fprintf(stderr, "\n");
+}
+void shift_frame(LPDecContext* pctxmaster, int index)
+{
+	if (pctxmaster == NULL || index < 0 || index >= pctxmaster->samplecount)
+		return;
+	if (pctxmaster->listfrmame[index]) av_frame_free(&pctxmaster->listfrmame[index]);
+
+	for (int i = index; i < pctxmaster->samplecount-1; i++)
+	{
+		pctxmaster->listfrmame[i] = pctxmaster->listfrmame[i + 1];
+	}
+	pctxmaster->samplecount--;
 }
 
 int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int samplenum)
@@ -485,7 +548,7 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 		return LP_ERROR_INVALID_PARAM;
 
 	
-	int ret, i, j, nvideonum, featureconut;
+	int ret, i, j, k, nvideonum, featureconut;
 	
 	LPDecContext* pcontext = NULL;
 	LPDecContext* ptmpcontext = NULL;
@@ -516,6 +579,45 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 	//grab all frames for compare
 	grab_allframes(pcontext, nvideonum);
 
+	//check skipped frame related FPS and Time stamp
+	if (pcontext->alivevideo) {
+		for (i = 0; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			for (j = 0; j < ptmpcontext->samplecount; j++)
+			{
+				if (ptmpcontext->listfrmame[j] == NULL) {
+					for (k = 0; k < nvideonum; k++) {
+						shift_frame(pcontext + k, j);
+					}
+					j--;
+				}
+			}
+		}
+	}
+#ifdef _DEBUG 
+	//check buffer
+	if (pcontext->alivevideo) {
+		fprintf(stderr, "video frame ids(%d): ", pcontext->samplecount);
+		for (int j = 0; j < pcontext->samplecount; j++)
+		{
+			fprintf(stderr, "%d (%03d_%lf), ", j, pcontext->frameindexs[j], pcontext->framestamps[j]);			
+		}
+		fprintf(stderr, "\n");
+	}
+
+	for (i = 0; i < nvideonum; i++) {
+		LPDecContext* ptmpcontext = pcontext + i;
+		fprintf(stderr, "video %d Skipped frame ids: ", i);
+		for (int j = 0; j < ptmpcontext->samplecount; j++)
+		{
+			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] == NULL) {
+				fprintf(stderr, "%d (%03d_%lf), ", j, pcontext->frameindexs[j], ptmpcontext->framestamps[j]);
+			}
+		}
+		fprintf(stderr, "\n");
+	}
+#endif
+
 #ifdef 	_DEBUG
 	for (i = 0; i < nvideonum; i++) {
 		LPDecContext* ptmpcontext = pcontext + i;
@@ -526,14 +628,10 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] != NULL) {
 				
 				sprintf(tmppath, "D:/tmp/%02d_%02d.bmp", i, j);
-#if 0 //def __OPENCV_
-				//imwrite(tmppath, *((Mat*)ptmpcontext->listfrmame[j]));
-#else
 				//get rgb bugffer
 				uint8_t *src = (uint8_t*)ptmpcontext->listfrmame[j]->data[0];
 				memcpy(pbuffer, src, ptmpcontext->normalh * ptmpcontext->normalw * 3 * sizeof(uint8_t));				
 				WriteColorBmp(tmppath, ptmpcontext->normalw, ptmpcontext->normalh, pbuffer);
-#endif
 			}
 			if (ptmpcontext->aliveaudio) {
 
@@ -541,12 +639,11 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 		}
 		if (pbuffer) free(pbuffer);
 	}
-
 #endif
 
 	//calculate features and matrix
-	//matirx column is [tamper, audiodiff, dct, gaussdiff, ... ] 2+featurecount
-	// create matrix for calculation
+	//matirx column is [tamper, audiodiff, dct, gaussiandiff, ... ] 2+featurecount
+	//create matrix for calculation
 	//first compare audio buffer
 	if (pcontext->aliveaudio) {
 		for (i = 1; i < nvideonum; i++) {
@@ -566,9 +663,14 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 	}
 
 	//aggregate matrix
+	if (pcontext->alivevideo) {
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			aggregate_matrix(ptmpcontext);
+		}
+	}
 	
-	//make and return float matrix
-	
+	//make python matrix and return	
 
 	for (i = 0; i < nvideonum; i++) {
 		release_context(pcontext + i);
