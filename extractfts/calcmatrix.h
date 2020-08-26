@@ -30,8 +30,8 @@ extern "C" {
 #define MAX_PATH 256
 #endif
 
-#ifndef USE_MULTI_THREAD
-#define USE_MULTI_THREAD 1
+#ifndef _DEBUG
+#define USE_MULTI_THREAD
 #endif
 
 // define enum type

@@ -307,7 +307,7 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 	}
 	
 	//run grabber thread , here grabber all frames based on time
-#if USE_MULTI_THREAD
+#ifdef USE_MULTI_THREAD
 	for (i = 0; i < ncount; i++) {
 		if (pthread_create(&threads[i], NULL, decode_frames, (void *)&pcontext[i])) {
 			fprintf(stderr, "Error create thread id %d\n", i);
@@ -360,8 +360,8 @@ void* calc_framediff(void* pairinfo)
 	Mat reference_frame, rendition_frame, next_reference_frame, next_rendition_frame;
 	Mat reference_frame_v, rendition_frame_v, next_reference_frame_v, next_rendition_frame_v;
 	Mat reference_frame_float, rendition_frame_float, reference_dct, rendition_dct;
-	double dmin, dmax;
-	Mat gauss_reference_frame, gauss_rendition_frame, difference_frame, threshold_frame, temporal_difference;
+	double dmin, dmax, deps, chi_dist , dtmpe;
+	Mat gauss_reference_frame, gauss_rendition_frame, difference_frame, threshold_frame, temporal_difference, difference_frame_p;
 	//sigma = 4
 	//gauss_reference_frame = gaussian(reference_frame_v, sigma = sigma)
 	//gauss_rendition_frame = gaussian(rendition_frame_v, sigma = sigma)
@@ -376,98 +376,113 @@ void* calc_framediff(void* pairinfo)
 	float s_ranges[] = { 0, 256 };
 	float v_ranges[] = { 0, 256 };
 	const float* ranges[] = { h_ranges, s_ranges, v_ranges };	
+	float *phis_a, *phis_b;
+	deps = 1e-10;
 	width = pctxmaster->normalw;
 	height = pctxmaster->normalh;
 
 	if (pctxmaster->listfrmame[index] == NULL || pctxrendition->listfrmame[index] == NULL)
 		return NULL;
 
+#ifdef _DEBUG
+	reference_frame = imread("d:/bmp/reference_frame.bmp");
+	rendition_frame = imread("d:/bmp/rendition_frame.bmp");
+	next_reference_frame = imread("d:/bmp/next_reference_frame.bmp");
+	next_rendition_frame = imread("d:/bmp/next_rendition_frame.bmp");
+#else
+
 	reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index]->data[0]);
 	rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index]->data[0]);
+
 	next_reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index+1]->data[0]);
 	next_rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index+1]->data[0]);
+#endif
+
+#if 0 //def _DEBUG
+	imwrite("d:/reference_frame.bmp", reference_frame);
+	imwrite("d:/rendition_frame.bmp", rendition_frame);
+	imwrite("d:/next_reference_frame.bmp", next_reference_frame);
+	imwrite("d:/next_rendition_frame.bmp", next_rendition_frame);
+#endif
 	
 	cvtColor(reference_frame, reference_frame_v, COLOR_BGR2HSV);
 	cvtColor(rendition_frame, rendition_frame_v, COLOR_BGR2HSV);
 	cvtColor(next_reference_frame, next_reference_frame_v, COLOR_BGR2HSV);
-	cvtColor(next_rendition_frame, next_rendition_frame_v, COLOR_BGR2HSV);
+	//cvtColor(next_rendition_frame, next_rendition_frame_v, COLOR_BGR2HSV);
 
 	extractChannel(reference_frame_v, reference_frame_v, 2);
 	extractChannel(rendition_frame_v, rendition_frame_v, 2);
 	extractChannel(next_reference_frame_v, next_reference_frame_v, 2);
-	extractChannel(next_rendition_frame_v, next_rendition_frame_v, 2);
+	//extractChannel(next_rendition_frame_v, next_rendition_frame_v, 2);
 
-	GaussianBlur(reference_frame_v, gauss_reference_frame, Size(3, 3), 4);
-	GaussianBlur(rendition_frame_v, gauss_rendition_frame, Size(3, 3), 4);
+	reference_frame_v.convertTo(reference_frame_float, CV_32FC1, 1.0 / 255.0);
+	rendition_frame_v.convertTo(rendition_frame_float, CV_32FC1, 1.0 / 255.0);
 
+	next_reference_frame_v.convertTo(next_reference_frame_v, CV_32FC1, 1.0 / 255.0);
+
+	
+
+	GaussianBlur(reference_frame_float, gauss_reference_frame, Size(33, 33), 4, 4);
+	GaussianBlur(rendition_frame_float, gauss_rendition_frame, Size(33, 33), 4, 4);	
+#ifdef _DEBUG
+	//imwrite("d:/c_gauss_reference_frame.bmp", gauss_reference_frame);
+	//imwrite("d:/c_gauss_rendition_frame.bmp", gauss_rendition_frame);	
+#endif
 	
 	dsum = dabssum = 0.0;
 	double* pout = pctxrendition->ftmatrix + (int)LP_FT_FEATURE_MAX * index;
 
 	absdiff(gauss_reference_frame, gauss_rendition_frame, difference_frame);
 	
+	fprintf(stderr, "frame feature(%d) :", index);
+
 	for (int i = 0; i < LP_FT_FEATURE_MAX; i++)
 	{
 		switch (i)
 		{
 		case LP_FT_DCT:			
-			reference_frame_v.convertTo(reference_frame_float, CV_32FC3, 1 / 255.0);
-			rendition_frame_v.convertTo(rendition_frame_float, CV_32FC3, 1 / 255.0);
 			dct(reference_frame_float, reference_dct);
 			dct(rendition_frame_float, rendition_dct);
-			minMaxIdx(reference_dct - rendition_dct,&dmin , &dmax);
+			minMaxIdx(reference_dct - rendition_dct, &dmin , &dmax);
 			*(pout + i) = dmax;
 			break;
-		case LP_FT_GAUSSIAN_MSE:			
-			/*for (x = 0; x < width; ++x) {
-				for (y = 0; y < height; ++y) {					
-					difference = (double)gauss_reference_frame.at<float>(x, y) -gauss_rendition_frame.at<float>(x, y);
-					dsum = dsum + difference * difference;
-					dabssum = dabssum + abs(difference);
-				}
-			}
-			dmse = dsum / (width*height);//PSNR*/
-			dmse = sum(difference_frame ^ 2).val[0] / (width*height);			
+		case LP_FT_GAUSSIAN_MSE:
+			pow(difference_frame, 2.0, difference_frame_p);
+			dmse = sum(difference_frame_p).val[0] / (width*height);
 			*(pout + i) = dmse;
 			break;
 		case LP_FT_GAUSSIAN_DIFF:
 			*(pout + i) = sum(difference_frame).val[0];
 			break;
 		case LP_FT_GAUSSIAN_TH_DIFF:
-			temporal_difference = (next_reference_frame_v / 255.0) - (rendition_frame_v / 255.0);						
+			absdiff(next_reference_frame_v, rendition_frame_float, temporal_difference);			
 			meanStdDev(temporal_difference, mean, stddev);
 			threshold(difference_frame, threshold_frame, stddev.val[0], 1, THRESH_BINARY);
 			ssum = sum(threshold_frame);
 			*(pout + i) = ssum.val[0];
 			break;
-		case LP_FT_HISTOGRAM_DISTANCE:
-				/*def histogram_distance(reference_frame, rendition_frame, eps = 1e-10)
-				bins = [8, 8, 8]
-				hist_a = cv2.calcHist([reference_frame], [0, 1, 2],
-					None, bins, [0, 256, 0, 256, 0, 256])
-				hist_a = cv2.normalize(hist_a, hist_a)
-				hist_b = cv2.calcHist([rendition_frame], [0, 1, 2],
-					None, bins, [0, 256, 0, 256, 0, 256])
-				hist_b = cv2.normalize(hist_b, hist_b)
-				# return out 3D histogram as a flattened array
-				hist_a = hist_a.flatten()
-				hist_b = hist_b.flatten()
-				# Return the chi squared distance of the histograms
-				chi_dist = 0.5 * np.sum([((a - b) ** 2) / (a + b + eps) for (a, b) in zip(hist_a, hist_b)])
-				return chi_dist
-				*/
-			calcHist(&reference_frame, 1, channels, Mat(), hist_a, 2, histSize, ranges, true, false);
-			normalize(hist_a, hist_a, 0, 1, NORM_MINMAX, -1, Mat());
+		case LP_FT_HISTOGRAM_DISTANCE:				
+			calcHist(&reference_frame, 1, channels, Mat(), hist_a, 3, bins, ranges, true, false);
+			normalize(hist_a, hist_a); phis_a = (float*)hist_a.data;
 
-			calcHist(&rendition_frame, 1, channels, Mat(), hist_b, 2, histSize, ranges, true, false);
-			normalize(hist_b, hist_b, 0, 1, NORM_MINMAX, -1, Mat());
-			*(pout + i) =  compareHist(hist_a, hist_b, HISTCMP_CHISQR);
-			
+			calcHist(&rendition_frame, 1, channels, Mat(), hist_b, 3, bins, ranges, true, false);
+			normalize(hist_b, hist_b); phis_b = (float*)hist_b.data;
+			chi_dist = 0.0;
+			for ( i = 0; i < 512; i++){
+				dtmpe = *phis_a - *phis_b;
+				chi_dist += (0.5 * dtmpe * dtmpe / (*phis_a + *phis_b + deps));
+				phis_a++; phis_b++;
+			}
+			*(pout + i) = chi_dist;
+			//*(pout + i) =  compareHist(hist_a, hist_b, HISTCMP_CHISQR);			
 			break;		
 		default:
 			break;
 		}
+
+		fprintf(stderr, "%lf ", *(pout + i));
 	}
+	fprintf(stderr, "\n");
 
 	return NULL;
 }
@@ -487,7 +502,7 @@ int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 		pairinfo[i].rendition = pctxrendition;
 		pairinfo[i].frameid = i;
 	}
-#if USE_MULTI_THREAD
+#ifdef USE_MULTI_THREAD
 	for (i = 0; i < ncount; i++) {
 		if (pthread_create(&threads[i], NULL, calc_framediff, (void *)&pairinfo[i])) {
 			fprintf(stderr, "Error create thread id %d\n", i);
@@ -524,10 +539,11 @@ int aggregate_matrix(LPDecContext* pctxrendition)
 		}
 
 		*poutstart = *poutstart / (pctxrendition->samplecount - 1);
-		fprintf(stderr, "%lf :", *poutstart);
+		fprintf(stderr, "%lf ", *poutstart);
 	}
 
 	fprintf(stderr, "\n");
+	return LP_OK;
 }
 void shift_frame(LPDecContext* pctxmaster, int index)
 {
