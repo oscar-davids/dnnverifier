@@ -34,6 +34,8 @@ extern "C" {
 #define USE_MULTI_THREAD
 #endif
 
+#define _TEST_MODULE
+
 // define enum type
 /*
 typedef enum returnType {
@@ -56,8 +58,8 @@ typedef enum errorType {
 
 typedef enum featureType {
 	LP_FT_DCT = 0,
-	LP_FT_GAUSSIAN_MSE,
 	LP_FT_GAUSSIAN_DIFF,
+	LP_FT_GAUSSIAN_MSE,	
 	LP_FT_GAUSSIAN_TH_DIFF,
 	LP_FT_HISTOGRAM_DISTANCE,
 	LP_FT_FEATURE_MAX,
@@ -95,6 +97,9 @@ typedef struct LPDecContext {
 	int					aliveaudio;
 	int					channels;
 	int					samplerate;
+	//file info
+	int					filesize;
+	int					audiodiff;	
 
 	//normalize width & height
 	int					normalw;
@@ -124,7 +129,11 @@ typedef struct LPPair {
 	int				frameid;
 } LPPair;
 
-int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int samplenum);
+#ifdef _TEST_MODULE
+int calc_featurediff(char* srcpath, char* renditions, int samplenum);
+#else
+PyObject *calc_featurediff(PyObject *self, PyObject *args);
+#endif
 
 #endif
 

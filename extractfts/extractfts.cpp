@@ -20,15 +20,11 @@ extern "C" {
 #include "extractfts.h"
 #include "calcmatrix.h"
 
-#define _TEST_MODULE
-
-#ifdef _TEST_MODULE
-#include "bmpio.h"
-#endif // DEBUG
-
 #ifndef _TEST_MODULE
 #include <Python.h>
 #include "numpy/arrayobject.h"
+#else
+#include "bmpio.h"
 #endif
 
 //define part
@@ -1431,10 +1427,10 @@ int main(int argc, char **argv)
 		
 
 	clock_t begin = clock();
-	int ntestcount = 1;
+	int ntestcount = 100;
 
 	for (int i = 0; i < ntestcount; i++) {
-		calc_featurediff((char*)src_filename, renditions, featurelist, 10);
+		calc_featurediff((char*)src_filename, renditions, 10);
 	}
 
 	clock_t end = clock();
@@ -1500,6 +1496,7 @@ static PyObject *get_psnr(PyObject *self, PyObject *args)
 
 static PyMethodDef FeatureMethods[] = {
 	{"loadft",  loadft, METH_VARARGS, "Load a frames feature."},
+	{"calc_featurediff",  calc_featurediff, METH_VARARGS, "calculate frames diff matrix."},
 	{"get_bitrate",  get_bitrate, METH_VARARGS, "Getting bitrate of a video.."},
 	{"get_qpi",  get_qpi, METH_VARARGS, "Getting qpI of a video.."},
 	{"get_bitrate_qpi",  get_bitrate_qpi, METH_VARARGS, "Getting bitrate and qp1 of a video.."},

@@ -1,18 +1,34 @@
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 #include "calcmatrix.h"
+
 #ifdef _WIN32
 #include "wininclude/pthread.h"
 #else
 #include "pthread.h"
 #endif
 
+#ifndef _TEST_MODULE
+#include <Python.h>
+#include "numpy/arrayobject.h"
+#else
 #ifdef _DEBUG
 #include "bmpio.h"
+#endif
 #endif
 
 using namespace cv;
 
-#define MAX_NUM_THREADS 16	//multithread count at same time
-#define MAX_NUM_SAMPLES 50	//sample count for compare
+#define MAX_NUM_RENDITIONS	11	//max count for rendition video(10) + master
+#define MAX_NUM_THREADS		16	//multithread count at same time
+#define MAX_NUM_SAMPLES		50	//sample count for compare
+
+#ifdef 	_DEBUG
+void debug_saveimage(LPDecContext* lpcontext, int videonum);
+void debug_printvframe(LPDecContext* lpcontext, int videonum);
+void debug_printmatrix(LPDecContext* lpcontext, int videonum);
+#endif
 
 int open_context(LPDecContext* lpcontext)
 {
@@ -39,7 +55,7 @@ int open_context(LPDecContext* lpcontext)
 		lpcontext->vstream = lpcontext->input_ctx->streams[lpcontext->video_stream];
 		lpcontext->vcontext = avcodec_alloc_context3(lpcontext->vcodec);
 
-		lpcontext->vcontext->thread_count = 16;
+		lpcontext->vcontext->thread_count = 8;
 
 		if (lpcontext->vcontext) {
 			avcodec_parameters_to_context(lpcontext->vcontext, lpcontext->vstream->codecpar);			
@@ -327,15 +343,15 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 
 	return LP_OK;
 }
-int pre_verify(LPDecContext* pcontext, int renditions)
+int pre_verify(LPDecContext* pcontext, int vcount)
 {
-	if (pcontext == NULL || renditions<=0)
+	if (pcontext == NULL || vcount <=0)
 		return LP_FAIL;
 
 	int i;
 	LPDecContext* prendition;
-	for (i = 0; i < renditions; i++) {
-		prendition = pcontext + i + 1;
+	for (i = 1; i < vcount; i++) {
+		prendition = pcontext + i;
 		if (pcontext->alivevideo != prendition->alivevideo ||
 			pcontext->aliveaudio != prendition->aliveaudio ||
 			pcontext->samplerate != prendition->samplerate)
@@ -366,7 +382,7 @@ void* calc_framediff(void* pairinfo)
 	//gauss_reference_frame = gaussian(reference_frame_v, sigma = sigma)
 	//gauss_rendition_frame = gaussian(rendition_frame_v, sigma = sigma)
 	double dsum, difference, dmse , dabssum;
-	int width, height;
+	int width, height, i, j;
 	Scalar mean, stddev, ssum;
 	MatND hist_a, hist_b;
 	int channels[] = { 0, 1, 2 };
@@ -384,7 +400,7 @@ void* calc_framediff(void* pairinfo)
 	if (pctxmaster->listfrmame[index] == NULL || pctxrendition->listfrmame[index] == NULL)
 		return NULL;
 
-#ifdef _DEBUG
+#if 0 //def _DEBUG
 	reference_frame = imread("d:/bmp/reference_frame.bmp");
 	rendition_frame = imread("d:/bmp/rendition_frame.bmp");
 	next_reference_frame = imread("d:/bmp/next_reference_frame.bmp");
@@ -395,7 +411,7 @@ void* calc_framediff(void* pairinfo)
 	rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index]->data[0]);
 
 	next_reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index+1]->data[0]);
-	next_rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index+1]->data[0]);
+	//next_rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index+1]->data[0]);
 #endif
 
 #if 0 //def _DEBUG
@@ -418,25 +434,22 @@ void* calc_framediff(void* pairinfo)
 	reference_frame_v.convertTo(reference_frame_float, CV_32FC1, 1.0 / 255.0);
 	rendition_frame_v.convertTo(rendition_frame_float, CV_32FC1, 1.0 / 255.0);
 
-	next_reference_frame_v.convertTo(next_reference_frame_v, CV_32FC1, 1.0 / 255.0);
-
-	
+	next_reference_frame_v.convertTo(next_reference_frame_v, CV_32FC1, 1.0 / 255.0);	
 
 	GaussianBlur(reference_frame_float, gauss_reference_frame, Size(33, 33), 4, 4);
 	GaussianBlur(rendition_frame_float, gauss_rendition_frame, Size(33, 33), 4, 4);	
-#ifdef _DEBUG
-	//imwrite("d:/c_gauss_reference_frame.bmp", gauss_reference_frame);
-	//imwrite("d:/c_gauss_rendition_frame.bmp", gauss_rendition_frame);	
+
+#if 0 //def _DEBUG
+	imwrite("d:/c_gauss_reference_frame.bmp", gauss_reference_frame);
+	imwrite("d:/c_gauss_rendition_frame.bmp", gauss_rendition_frame);	
 #endif
 	
 	dsum = dabssum = 0.0;
 	double* pout = pctxrendition->ftmatrix + (int)LP_FT_FEATURE_MAX * index;
 
-	absdiff(gauss_reference_frame, gauss_rendition_frame, difference_frame);
-	
-	fprintf(stderr, "frame feature(%d) :", index);
+	absdiff(gauss_reference_frame, gauss_rendition_frame, difference_frame);	
 
-	for (int i = 0; i < LP_FT_FEATURE_MAX; i++)
+	for (i = 0; i < LP_FT_FEATURE_MAX; i++)
 	{
 		switch (i)
 		{
@@ -446,13 +459,13 @@ void* calc_framediff(void* pairinfo)
 			minMaxIdx(reference_dct - rendition_dct, &dmin , &dmax);
 			*(pout + i) = dmax;
 			break;
+		case LP_FT_GAUSSIAN_DIFF:
+			*(pout + i) = sum(difference_frame).val[0];
+			break;
 		case LP_FT_GAUSSIAN_MSE:
 			pow(difference_frame, 2.0, difference_frame_p);
 			dmse = sum(difference_frame_p).val[0] / (width*height);
 			*(pout + i) = dmse;
-			break;
-		case LP_FT_GAUSSIAN_DIFF:
-			*(pout + i) = sum(difference_frame).val[0];
 			break;
 		case LP_FT_GAUSSIAN_TH_DIFF:
 			absdiff(next_reference_frame_v, rendition_frame_float, temporal_difference);			
@@ -468,21 +481,18 @@ void* calc_framediff(void* pairinfo)
 			calcHist(&rendition_frame, 1, channels, Mat(), hist_b, 3, bins, ranges, true, false);
 			normalize(hist_b, hist_b); phis_b = (float*)hist_b.data;
 			chi_dist = 0.0;
-			for ( i = 0; i < 512; i++){
+			for ( j = 0; j < 512; j++){
 				dtmpe = *phis_a - *phis_b;
 				chi_dist += (0.5 * dtmpe * dtmpe / (*phis_a + *phis_b + deps));
 				phis_a++; phis_b++;
-			}
+			}			
 			*(pout + i) = chi_dist;
 			//*(pout + i) =  compareHist(hist_a, hist_b, HISTCMP_CHISQR);			
 			break;		
 		default:
 			break;
 		}
-
-		fprintf(stderr, "%lf ", *(pout + i));
 	}
-	fprintf(stderr, "\n");
 
 	return NULL;
 }
@@ -527,9 +537,6 @@ int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 int aggregate_matrix(LPDecContext* pctxrendition)
 {	
 	double* pout = pctxrendition->ftmatrix;
-
-	fprintf(stderr, "aggregate(%d) :", pctxrendition->samplecount - 1);
-
 	for (int j = 0; j < LP_FT_FEATURE_MAX; j++)
 	{
 		double* poutstart = pout + j;
@@ -539,10 +546,9 @@ int aggregate_matrix(LPDecContext* pctxrendition)
 		}
 
 		*poutstart = *poutstart / (pctxrendition->samplecount - 1);
-		fprintf(stderr, "%lf ", *poutstart);
+		//up scale values
+		*poutstart = *poutstart * pctxrendition->width * pctxrendition->height;		
 	}
-
-	fprintf(stderr, "\n");
 	return LP_OK;
 }
 void shift_frame(LPDecContext* pctxmaster, int index)
@@ -557,46 +563,10 @@ void shift_frame(LPDecContext* pctxmaster, int index)
 	}
 	pctxmaster->samplecount--;
 }
-
-int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int samplenum)
+void remove_nullframe(LPDecContext* pcontext, int nvideonum)
 {
-	if (srcpath == NULL || renditions == NULL /*|| featurelist == NULL*/)
-		return LP_ERROR_NULL_POINT;
-	if(samplenum <= 0 || samplenum >= MAX_NUM_SAMPLES)
-		return LP_ERROR_INVALID_PARAM;
-
-	
-	int ret, i, j, k, nvideonum, featureconut;
-	
-	LPDecContext* pcontext = NULL;
+	int i, j, k;
 	LPDecContext* ptmpcontext = NULL;
-
-	//parser renditions url & featurelist
-	nvideonum = 2;
-	featureconut = 5;
-
-	//create context and read	
-	pcontext = (LPDecContext*)malloc(sizeof(LPDecContext) * nvideonum);
-	memset(pcontext, 0x00, sizeof(LPDecContext) * nvideonum);
-
-	strcpy(pcontext[0].path, srcpath);
-	strcpy(pcontext[1].path, renditions);
-
-	for (i = 0; i < nvideonum; i++) {
-		ptmpcontext = pcontext + i;
-		ptmpcontext->audio_stream = -1;
-		ptmpcontext->video_stream = -1;
-		ptmpcontext->samplecount = samplenum;
-
-		ret = open_context(ptmpcontext);		
-		if (ret != LP_OK) break;
-
-	}	
-	//pre verify with metadata
-	pre_verify(pcontext, nvideonum - 1);
-	//grab all frames for compare
-	grab_allframes(pcontext, nvideonum);
-
 	//check skipped frame related FPS and Time stamp
 	if (pcontext->alivevideo) {
 		for (i = 0; i < nvideonum; i++) {
@@ -612,64 +582,98 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 			}
 		}
 	}
-#ifdef _DEBUG 
-	//check buffer
-	if (pcontext->alivevideo) {
-		fprintf(stderr, "video frame ids(%d): ", pcontext->samplecount);
-		for (int j = 0; j < pcontext->samplecount; j++)
-		{
-			fprintf(stderr, "%d (%03d_%lf), ", j, pcontext->frameindexs[j], pcontext->framestamps[j]);			
-		}
-		fprintf(stderr, "\n");
-	}
+}
 
-	for (i = 0; i < nvideonum; i++) {
-		LPDecContext* ptmpcontext = pcontext + i;
-		fprintf(stderr, "video %d Skipped frame ids: ", i);
-		for (int j = 0; j < ptmpcontext->samplecount; j++)
-		{
-			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] == NULL) {
-				fprintf(stderr, "%d (%03d_%lf), ", j, pcontext->frameindexs[j], ptmpcontext->framestamps[j]);
+#ifdef Py_PYTHON_H
+PyObject *calc_featurediff(PyObject *self, PyObject *args)
+#else
+int calc_featurediff(char* srcpath, char* renditions, int samplenum)
+#endif
+{
+#ifdef Py_PYTHON_H
+	char* srcpath = NULL;
+	char* renditions = NULL;
+	int samplenum = 0;
+	PyArrayObject *final_arr = NULL;
+	if (!PyArg_ParseTuple(args, "ssi", &srcpath, &renditions, &samplenum)) return NULL;
+#endif
+
+	if (srcpath == NULL || renditions == NULL)
+		return LP_ERROR_NULL_POINT;
+	if(samplenum <= 0 || samplenum >= MAX_NUM_SAMPLES)
+		return LP_ERROR_INVALID_PARAM;
+
+	int ret, i, j, k, adiff, nvideonum;
+	struct stat fstatus;
+
+	LPDecContext* pcontext = NULL;
+	LPDecContext* ptmpcontext = NULL;
+
+	//create context and read	
+	pcontext = (LPDecContext*)malloc(sizeof(LPDecContext) * MAX_NUM_RENDITIONS);
+	memset(pcontext, 0x00, sizeof(LPDecContext) * MAX_NUM_RENDITIONS);
+
+	//set master video path
+	strcpy(pcontext[0].path, srcpath);
+	//parser renditions url
+	int slen = strlen(renditions);
+	int sstart, sfinddot;
+	sstart = sfinddot = 0;	
+	nvideonum = 1;
+	for ( i = 0; i < slen; i++)
+	{
+		if (renditions[i] == '.') sfinddot = 1;
+		if (renditions[i] == ',') {
+			if (sfinddot && (i - sstart) > 2) {				
+				strncpy(pcontext[nvideonum].path, renditions+ sstart, i - sstart);
+				sstart = i + 1;
+				sfinddot = 0;
+				nvideonum++;
+				if (nvideonum >= MAX_NUM_RENDITIONS) break;
 			}
 		}
-		fprintf(stderr, "\n");
 	}
-#endif
+	if ((i - sstart) > 2 && sfinddot && nvideonum < MAX_NUM_RENDITIONS) {
+		strncpy(pcontext[nvideonum].path, renditions + sstart, i - sstart);
+		nvideonum++;
+	}
+	
+	for (i = 0; i < nvideonum; i++) {
+		ptmpcontext = pcontext + i;
+		ptmpcontext->audio_stream = -1;
+		ptmpcontext->video_stream = -1;
+		ptmpcontext->samplecount = samplenum;
+		ret = stat(pcontext[i].path, &fstatus);
+		if (ret == 0) {
+			ptmpcontext->filesize = fstatus.st_size;			
+		}
+		ret = open_context(ptmpcontext);
+	}	
+	//pre verify with metadata
+	pre_verify(pcontext, nvideonum);
+	//grab all frames for compare
+	grab_allframes(pcontext, nvideonum);
+
+	remove_nullframe(pcontext, nvideonum);
 
 #ifdef 	_DEBUG
-	for (i = 0; i < nvideonum; i++) {
-		LPDecContext* ptmpcontext = pcontext + i;
-		char tmppath[MAX_PATH] = { 0, };
-		uint8_t *pbuffer = (uint8_t*)malloc(sizeof(uint8_t) * ptmpcontext->normalh * ptmpcontext->normalw* 3);
-		for ( int j = 0; j < ptmpcontext->samplecount;  j++)
-		{
-			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] != NULL) {
-				
-				sprintf(tmppath, "D:/tmp/%02d_%02d.bmp", i, j);
-				//get rgb bugffer
-				uint8_t *src = (uint8_t*)ptmpcontext->listfrmame[j]->data[0];
-				memcpy(pbuffer, src, ptmpcontext->normalh * ptmpcontext->normalw * 3 * sizeof(uint8_t));				
-				WriteColorBmp(tmppath, ptmpcontext->normalw, ptmpcontext->normalh, pbuffer);
-			}
-			if (ptmpcontext->aliveaudio) {
-
-			}
-		}
-		if (pbuffer) free(pbuffer);
-	}
+	//debug_printvframe(pcontext, nvideonum);
+	//debug_saveimage(pcontext, nvideonum);
 #endif
 
-	//calculate features and matrix
-	//matirx column is [tamper, audiodiff, dct, gaussiandiff, ... ] 2+featurecount
-	//create matrix for calculation
+	//calculate features and matrix		
 	//first compare audio buffer
 	if (pcontext->aliveaudio) {
 		for (i = 1; i < nvideonum; i++) {
+			adiff = 0;
 			ptmpcontext = pcontext + i;
 			for (j = 0; j < pcontext->samplecount; j++) {
-				memcmp(pcontext->listaudio[i]->data, ptmpcontext->listaudio[i]->data, pcontext->listaudio[i]->size);
-				//set matrix value
+				if(pcontext->listaudio[i] && ptmpcontext->listaudio[i])
+					adiff += memcmp(pcontext->listaudio[i]->data, ptmpcontext->listaudio[i]->data, pcontext->listaudio[i]->size);				
 			}
+			//set matrix value
+			if (adiff)
+				ptmpcontext->audiodiff = adiff;
 		}
 	}
 	//calculate vframe matrix
@@ -687,13 +691,107 @@ int calc_featurediff(char* srcpath, char* renditions, char* featurelist, int sam
 			aggregate_matrix(ptmpcontext);
 		}
 	}
-	
-	//make python matrix and return	
+
+#ifdef 	_DEBUG
+	debug_printmatrix(pcontext, nvideonum);
+#endif	
+	//make python matrix and return		
+	//matirx column is [metatamper, videoalive, audioalive, fps, width, height, audiodiff, sizeratio, dctdiff, gaussiandiff, gaussiamse, gaussianthreshold, histogramdiff]
+#ifdef Py_PYTHON_H
+	npy_intp dims[2];
+	dims[0] = nvideonum - 1;
+	dims[1] = 13;
+	final_arr = (PyArrayObject*)PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);
+		
+	//memcpy(final_arr->data, fnormal, buffersize);
+	//matrix setting
+	float* pdata = (float*)final_arr->data;
+	for (i = 1; i < nvideonum; i++){
+		ptmpcontext = pcontext + i;
+		pdata[0] = ptmpcontext->tamper; pdata[1] = ptmpcontext->alivevideo; pdata[2] = ptmpcontext->aliveaudio; pdata[3] = ptmpcontext->fps;
+		pdata[4] = ptmpcontext->width; pdata[4] = ptmpcontext->height; pdata[6] = ptmpcontext->audiodiff; 
+		pdata[7] = ptmpcontext->filesize/(ptmpcontext->width * ptmpcontext->height);
+		for ( j = 0; j < LP_FT_FEATURE_MAX; j++){
+			pdata[8 + j] = ptmpcontext->ftmatrix[j];
+		}
+		pdata += 13;
+	}
+#endif
 
 	for (i = 0; i < nvideonum; i++) {
 		release_context(pcontext + i);
 	}
 	if (pcontext) free(pcontext);
 
+#ifdef Py_PYTHON_H
+	return PyArray_Return(final_arr);
+#else
 	return LP_OK;
+#endif
 }
+
+#ifdef _DEBUG
+void debug_saveimage(LPDecContext* lpcontext, int videonum)
+{
+	int i; 
+	for (i = 0; i < videonum; i++) {
+		LPDecContext* ptmpcontext = lpcontext + i;
+		char tmppath[MAX_PATH] = { 0, };
+		uint8_t *pbuffer = (uint8_t*)malloc(sizeof(uint8_t) * ptmpcontext->normalh * ptmpcontext->normalw * 3);
+		for (int j = 0; j < ptmpcontext->samplecount; j++)
+		{
+			if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] != NULL) {
+
+				sprintf(tmppath, "D:/tmp/%02d_%02d.bmp", i, j);
+				//get rgb bugffer
+				uint8_t *src = (uint8_t*)ptmpcontext->listfrmame[j]->data[0];
+				memcpy(pbuffer, src, ptmpcontext->normalh * ptmpcontext->normalw * 3 * sizeof(uint8_t));
+				WriteColorBmp(tmppath, ptmpcontext->normalw, ptmpcontext->normalh, pbuffer);
+			}
+			if (ptmpcontext->aliveaudio) {
+
+			}
+		}
+		if (pbuffer) free(pbuffer);
+	}
+}
+void debug_printvframe(LPDecContext* lpcontext, int videonum)
+{
+	int i, j;
+	//check buffer
+	if (lpcontext->alivevideo) {
+		fprintf(stderr, "video frame ids(%d): ", lpcontext->samplecount);
+		for (int j = 0; j < lpcontext->samplecount; j++)
+		{
+			fprintf(stderr, "%d (%03d_%lf), ", j, lpcontext->frameindexs[j], lpcontext->framestamps[j]);
+		}
+		fprintf(stderr, "\n");
+
+		for (i = 0; i < videonum; i++) {
+			LPDecContext* ptmpcontext = lpcontext + i;
+			fprintf(stderr, "video %d Skipped frame ids: ", i);
+			for (int j = 0; j < ptmpcontext->samplecount; j++)
+			{
+				if (ptmpcontext->alivevideo && ptmpcontext->listfrmame[j] == NULL) {
+					fprintf(stderr, "%d (%03d_%lf), ", j, lpcontext->frameindexs[j], ptmpcontext->framestamps[j]);
+				}
+			}
+			fprintf(stderr, "\n");
+		}
+	}
+}
+void debug_printmatrix(LPDecContext* lpcontext, int videonum)
+{
+	int i;
+	for (i = 1; i < videonum; i++) {
+		LPDecContext* ptmpcontext = lpcontext + i;
+		double* pout = ptmpcontext->ftmatrix;
+		fprintf(stderr, "aggregate(%d) :", ptmpcontext->samplecount - 1);
+		for (int j = 0; j < LP_FT_FEATURE_MAX; j++)
+		{
+			fprintf(stderr, "%lf ", *(pout + j));
+		}
+		fprintf(stderr, "\n");
+	}	
+}
+#endif
