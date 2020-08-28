@@ -15,6 +15,7 @@ extern "C" {
 #include <libavutil/motion_vector.h>
 #include <libavformat/avformat.h>
 #include <libavutil/pixfmt.h>
+#include <libavutil/imgutils.h>
 #include <libswscale/swscale.h>
 #include <libavcodec/avcodec.h>
 
@@ -36,6 +37,11 @@ extern "C" {
 
 #define _TEST_MODULE
 
+#ifndef _TEST_MODULE
+#include <Python.h>
+#include "numpy/arrayobject.h"
+#endif
+
 // define enum type
 /*
 typedef enum returnType {
@@ -45,6 +51,10 @@ typedef enum returnType {
 */
 #define LP_FAIL		-1
 #define LP_OK		 0
+
+#define MAX_NUM_RENDITIONS	11	//max count for rendition video(10) + master
+#define MAX_NUM_THREADS		16	//multithread count at same time
+#define MAX_NUM_SAMPLES		50	//sample count for compare
 
 
 typedef enum errorType {
@@ -58,8 +68,8 @@ typedef enum errorType {
 
 typedef enum featureType {
 	LP_FT_DCT = 0,
-	LP_FT_GAUSSIAN_DIFF,
-	LP_FT_GAUSSIAN_MSE,	
+	LP_FT_GAUSSIAN_MSE,
+	LP_FT_GAUSSIAN_DIFF,	
 	LP_FT_GAUSSIAN_TH_DIFF,
 	LP_FT_HISTOGRAM_DISTANCE,
 	LP_FT_FEATURE_MAX,
@@ -129,11 +139,20 @@ typedef struct LPPair {
 	int				frameid;
 } LPPair;
 
-#ifdef _TEST_MODULE
-int calc_featurediff(char* srcpath, char* renditions, int samplenum);
-#else
-PyObject *calc_featurediff(PyObject *self, PyObject *args);
+
+int open_context(LPDecContext* lpcontext);
+void close_context(LPDecContext* lpcontext);
+int pre_verify(LPDecContext* pcontext, int vcount);
+int grab_allframes(LPDecContext* pcontext, int ncount);
+void remove_nullframe(LPDecContext* pcontext, int nvideonum);
+int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition);
+int aggregate_matrix(LPDecContext* pctxrendition);
+
+#ifdef _DEBUG
+void debug_saveimage(LPDecContext* lpcontext, int videonum);
+void debug_printvframe(LPDecContext* lpcontext, int videonum);
+void debug_printmatrix(LPDecContext* lpcontext, int videonum);
 #endif
 
-#endif
+#endif //_CALC_MATRIX_H
 

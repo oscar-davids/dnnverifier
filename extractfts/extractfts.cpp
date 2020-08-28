@@ -2,23 +2,9 @@
 
  * THE SOFTWARE.
  */
-#ifdef __cplusplus
-extern "C" {
-#endif
 
-#include <libavutil/motion_vector.h>
-#include <libavformat/avformat.h>
-#include <libavutil/pixfmt.h>
-#include <libavutil/imgutils.h>	
-#include <libswscale/swscale.h>
-#include <libavcodec/avcodec.h>
-	
-#ifdef __cplusplus
-}
-#endif
-
-#include "extractfts.h"
 #include "calcmatrix.h"
+#include "extractfts.h"
 
 #ifndef _TEST_MODULE
 #include <Python.h>
@@ -26,6 +12,175 @@ extern "C" {
 #else
 #include "bmpio.h"
 #endif
+
+
+///////////////////////////////// CALCMATRIX_DEFINE
+
+#ifdef Py_PYTHON_H
+static PyObject *calc_featurediff(PyObject *self, PyObject *args)
+#else
+int calc_featurediff(char* srcpath, char* renditions, int samplenum)
+#endif
+{
+#ifdef Py_PYTHON_H
+	char* srcpath = NULL;
+	char* renditions = NULL;
+	int samplenum = 0;
+	PyArrayObject *final_arr = NULL;
+	if (!PyArg_ParseTuple(args, "ssi", &srcpath, &renditions, &samplenum)) return NULL;
+#endif
+
+	if (srcpath == NULL || renditions == NULL) {
+#ifdef Py_PYTHON_H
+		return NULL;
+#else
+		return LP_ERROR_NULL_POINT;
+#endif
+	}
+
+	if (samplenum <= 0 || samplenum >= MAX_NUM_SAMPLES) {
+#ifdef Py_PYTHON_H
+		return NULL;
+#else
+		return LP_ERROR_INVALID_PARAM;
+#endif
+	}
+
+	int ret, i, j, k, adiff, nvideonum;
+	struct stat fstatus;
+
+	LPDecContext* pcontext = NULL;
+	LPDecContext* ptmpcontext = NULL;
+
+	//create context and read	
+	pcontext = (LPDecContext*)malloc(sizeof(LPDecContext) * MAX_NUM_RENDITIONS);
+	memset(pcontext, 0x00, sizeof(LPDecContext) * MAX_NUM_RENDITIONS);
+
+	//set master video path
+	strcpy(pcontext[0].path, srcpath);
+	//parser renditions url
+	int slen = strlen(renditions);
+	int sstart, sfinddot;
+	sstart = sfinddot = 0;
+	nvideonum = 1;
+	for (i = 0; i < slen; i++)
+	{
+		if (renditions[i] == '.') sfinddot = 1;
+		if (renditions[i] == ',') {
+			if (sfinddot && (i - sstart) > 2) {
+				strncpy(pcontext[nvideonum].path, renditions + sstart, i - sstart);
+				sstart = i + 1;
+				sfinddot = 0;
+				nvideonum++;
+				if (nvideonum >= MAX_NUM_RENDITIONS) break;
+			}
+		}
+	}
+	if ((i - sstart) > 2 && sfinddot && nvideonum < MAX_NUM_RENDITIONS) {
+		strncpy(pcontext[nvideonum].path, renditions + sstart, i - sstart);
+		nvideonum++;
+	}
+
+	for (i = 0; i < nvideonum; i++) {
+		ptmpcontext = pcontext + i;
+		ptmpcontext->audio_stream = -1;
+		ptmpcontext->video_stream = -1;
+		ptmpcontext->samplecount = samplenum;
+		ret = stat(pcontext[i].path, &fstatus);
+		if (ret == 0) {
+			ptmpcontext->filesize = fstatus.st_size;
+		}
+		ret = open_context(ptmpcontext);
+	}
+	//pre verify with metadata
+	pre_verify(pcontext, nvideonum);
+	//grab all frames for compare
+	grab_allframes(pcontext, nvideonum);
+
+	remove_nullframe(pcontext, nvideonum);
+
+#ifdef 	_DEBUG
+	//debug_printvframe(pcontext, nvideonum);
+	//debug_saveimage(pcontext, nvideonum);
+#endif
+
+	//calculate features and matrix		
+	//first compare audio buffer
+	if (pcontext->aliveaudio) {
+		for (i = 1; i < nvideonum; i++) {
+			adiff = 0;
+			ptmpcontext = pcontext + i;
+			for (j = 0; j < pcontext->samplecount; j++) {
+				if (pcontext->listaudio[i] && ptmpcontext->listaudio[i])
+					adiff += memcmp(pcontext->listaudio[i]->data, ptmpcontext->listaudio[i]->data, pcontext->listaudio[i]->size);
+			}
+			//set matrix value
+			if (adiff)
+				ptmpcontext->audiodiff = adiff;
+		}
+	}
+	//calculate vframe matrix
+	if (pcontext->alivevideo) {
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			calc_featurematrix(pcontext, ptmpcontext);
+		}
+	}
+
+	//aggregate matrix
+	if (pcontext->alivevideo) {
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			aggregate_matrix(ptmpcontext);
+		}
+	}
+
+#ifdef 	_DEBUG
+	debug_printmatrix(pcontext, nvideonum);
+#endif	
+	//make python matrix and return		
+	//matirx column is [metatamper, videoalive, audioalive, fps, width, height, audiodiff, sizeratio, dctdiff, gaussiamse, gaussiandiff, gaussianthreshold, histogramdiff]
+#ifdef Py_PYTHON_H
+	npy_intp dims[2];
+	dims[0] = nvideonum - 1;
+	dims[1] = 13;
+	final_arr = (PyArrayObject*)PyArray_ZEROS(2, dims, NPY_FLOAT32, 0);
+		
+	//memcpy(final_arr->data, fnormal, buffersize);
+	//matrix setting
+	float* pdata = (float*)final_arr->data;
+	for (i = 1; i < nvideonum; i++) {
+		ptmpcontext = pcontext + i;
+		pdata[0] = ptmpcontext->tamper; pdata[1] = ptmpcontext->alivevideo; pdata[2] = ptmpcontext->aliveaudio; pdata[3] = ptmpcontext->fps;
+		pdata[4] = ptmpcontext->width; pdata[5] = ptmpcontext->height; pdata[6] = ptmpcontext->audiodiff;
+		pdata[7] = (float)ptmpcontext->filesize / (float)(ptmpcontext->width * ptmpcontext->height);
+		for (j = 0; j < LP_FT_FEATURE_MAX; j++) {
+			pdata[8 + j] = ptmpcontext->ftmatrix[j];
+		}
+#ifdef _DEBUG
+		//for debug
+		fprintf(stderr, "feature vid (%d) :", i - 1);
+		for (j = 0; j < 13; j++){
+			fprintf(stderr, "%lf ", pdata[j]);
+		}
+		fprintf(stderr, "\n");
+#endif
+		pdata += 13;
+	}
+#endif
+
+	for (i = 0; i < nvideonum; i++) {
+		close_context(pcontext + i);
+	}
+	if (pcontext) free(pcontext);
+
+#ifdef Py_PYTHON_H
+	return PyArray_Return(final_arr);
+#else
+	return LP_OK;
+#endif
+}
+///////////////////////////////// CALCMATRIX_DEFINE
 
 //define part
 #define FF_INPUT_BUFFER_PADDING_SIZE 32
@@ -1478,6 +1633,7 @@ static PyObject *get_qpi(PyObject *self, PyObject *args)
 	fqpi = getqpi(filename);
 	return Py_BuildValue("f", fqpi);
 }
+
 static PyObject *get_psnr(PyObject *self, PyObject *args)
 {
 	if (!PyArg_ParseTuple(args, "s", &filename)) return NULL;
@@ -1488,21 +1644,21 @@ static PyObject *get_psnr(PyObject *self, PyObject *args)
 
 	calc_bitrate_qpi(&bitrate, &qpi);
 
-	fpsnr = 74.791 - 2.215 * log10(bitrate) - 0.975 * qpi + 0.00001708 * bitrate * qpi;
+	fpsnr = 74.791 -2.215 * log10(bitrate) - 0.975 * qpi + 0.00001708 * bitrate * qpi;
 
 	return Py_BuildValue("f", fpsnr);
 }
 
 
 static PyMethodDef FeatureMethods[] = {
-	{"loadft",  loadft, METH_VARARGS, "Load a frames feature."},
-	{"calc_featurediff",  calc_featurediff, METH_VARARGS, "calculate frames diff matrix."},
-	{"get_bitrate",  get_bitrate, METH_VARARGS, "Getting bitrate of a video.."},
-	{"get_qpi",  get_qpi, METH_VARARGS, "Getting qpI of a video.."},
-	{"get_bitrate_qpi",  get_bitrate_qpi, METH_VARARGS, "Getting bitrate and qp1 of a video.."},
-	{"get_psnr",  get_psnr, METH_VARARGS, "Getting psnr of a video.."},
-	{"get_num_gops",  get_num_gops, METH_VARARGS, "Getting number of GOPs in a video."},
-	{"get_num_frames",  get_num_frames, METH_VARARGS, "Getting number of frames in a video."},
+	//{"loadft",  loadft, METH_VARARGS, "Load a frames feature."},
+	{"calc_featurediff",  calc_featurediff, METH_VARARGS, "Calculate frames diff matrix."},
+	//{"get_bitrate",  get_bitrate, METH_VARARGS, "Getting bitrate of a video.."},
+	//{"get_qpi",  get_qpi, METH_VARARGS, "Getting qpI of a video.."},
+	//{"get_bitrate_qpi",  get_bitrate_qpi, METH_VARARGS, "Getting bitrate and qp1 of a video.."},
+	{"get_psnr",  get_psnr, METH_VARARGS, "Getting psnr of a video."},
+	//{"get_num_gops",  get_num_gops, METH_VARARGS, "Getting number of GOPs in a video."},
+	//{"get_num_frames",  get_num_frames, METH_VARARGS, "Getting number of frames in a video."},
 	{NULL, NULL, 0, NULL}        /* Sentinel */
 };
 

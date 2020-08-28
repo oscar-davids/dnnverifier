@@ -20,16 +20,6 @@
 
 using namespace cv;
 
-#define MAX_NUM_RENDITIONS	11	//max count for rendition video(10) + master
-#define MAX_NUM_THREADS		16	//multithread count at same time
-#define MAX_NUM_SAMPLES		50	//sample count for compare
-
-#ifdef 	_DEBUG
-void debug_saveimage(LPDecContext* lpcontext, int videonum);
-void debug_printvframe(LPDecContext* lpcontext, int videonum);
-void debug_printmatrix(LPDecContext* lpcontext, int videonum);
-#endif
-
 int open_context(LPDecContext* lpcontext)
 {
 	if (lpcontext == NULL || strlen(lpcontext->path) <= 0) return LP_FAIL;
@@ -111,7 +101,7 @@ int open_context(LPDecContext* lpcontext)
 
 	return LP_OK;
 }
-void release_context(LPDecContext* lpcontext)
+void close_context(LPDecContext* lpcontext)
 {
 	//release timestamp array
 	if (lpcontext->frameindexs)
@@ -459,13 +449,13 @@ void* calc_framediff(void* pairinfo)
 			minMaxIdx(reference_dct - rendition_dct, &dmin , &dmax);
 			*(pout + i) = dmax;
 			break;
-		case LP_FT_GAUSSIAN_DIFF:
-			*(pout + i) = sum(difference_frame).val[0];
-			break;
 		case LP_FT_GAUSSIAN_MSE:
 			pow(difference_frame, 2.0, difference_frame_p);
 			dmse = sum(difference_frame_p).val[0] / (width*height);
 			*(pout + i) = dmse;
+			break;
+		case LP_FT_GAUSSIAN_DIFF:
+			*(pout + i) = sum(difference_frame).val[0];
 			break;
 		case LP_FT_GAUSSIAN_TH_DIFF:
 			absdiff(next_reference_frame_v, rendition_frame_float, temporal_difference);			
@@ -584,8 +574,9 @@ void remove_nullframe(LPDecContext* pcontext, int nvideonum)
 	}
 }
 
+#if 0
 #ifdef Py_PYTHON_H
-PyObject *calc_featurediff(PyObject *self, PyObject *args)
+static PyObject *calc_featurediff(PyObject *self, PyObject *args)
 #else
 int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 #endif
@@ -598,10 +589,21 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 	if (!PyArg_ParseTuple(args, "ssi", &srcpath, &renditions, &samplenum)) return NULL;
 #endif
 
-	if (srcpath == NULL || renditions == NULL)
+	if (srcpath == NULL || renditions == NULL) {
+#ifdef Py_PYTHON_H
+		return NULL;
+#else
 		return LP_ERROR_NULL_POINT;
-	if(samplenum <= 0 || samplenum >= MAX_NUM_SAMPLES)
+#endif
+	}
+		
+	if (samplenum <= 0 || samplenum >= MAX_NUM_SAMPLES) {
+#ifdef Py_PYTHON_H
+		return NULL;
+#else
 		return LP_ERROR_INVALID_PARAM;
+#endif
+	}	
 
 	int ret, i, j, k, adiff, nvideonum;
 	struct stat fstatus;
@@ -701,7 +703,7 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 	npy_intp dims[2];
 	dims[0] = nvideonum - 1;
 	dims[1] = 13;
-	final_arr = (PyArrayObject*)PyArray_ZEROS(1, dims, NPY_FLOAT32, 0);
+	final_arr = (PyArrayObject*)PyArray_ZEROS(2, dims, NPY_FLOAT32, 0);
 		
 	//memcpy(final_arr->data, fnormal, buffersize);
 	//matrix setting
@@ -709,17 +711,25 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 	for (i = 1; i < nvideonum; i++){
 		ptmpcontext = pcontext + i;
 		pdata[0] = ptmpcontext->tamper; pdata[1] = ptmpcontext->alivevideo; pdata[2] = ptmpcontext->aliveaudio; pdata[3] = ptmpcontext->fps;
-		pdata[4] = ptmpcontext->width; pdata[4] = ptmpcontext->height; pdata[6] = ptmpcontext->audiodiff; 
-		pdata[7] = ptmpcontext->filesize/(ptmpcontext->width * ptmpcontext->height);
+		pdata[4] = ptmpcontext->width; pdata[5] = ptmpcontext->height; pdata[6] = ptmpcontext->audiodiff; 
+		pdata[7] = (float)ptmpcontext->filesize / (float)(ptmpcontext->width * ptmpcontext->height);
 		for ( j = 0; j < LP_FT_FEATURE_MAX; j++){
 			pdata[8 + j] = ptmpcontext->ftmatrix[j];
 		}
+#ifdef _DEBUG
+		//for debug
+		fprintf(stderr, "feature vid (%d) :", i - 1);
+		for (j = 0; j < 13; j++) {
+			fprintf(stderr, "%lf ", pdata[j]);
+		}
+		fprintf(stderr, "\n");
+#endif
 		pdata += 13;
 	}
 #endif
 
 	for (i = 0; i < nvideonum; i++) {
-		release_context(pcontext + i);
+		close_context(pcontext + i);
 	}
 	if (pcontext) free(pcontext);
 
@@ -729,6 +739,7 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 	return LP_OK;
 #endif
 }
+#endif
 
 #ifdef _DEBUG
 void debug_saveimage(LPDecContext* lpcontext, int videonum)
