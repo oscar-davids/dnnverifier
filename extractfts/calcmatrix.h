@@ -4,9 +4,12 @@
 #ifdef __cplusplus
 
 #include "opencv2/imgproc.hpp"
-#include "opencv2/imgcodecs.hpp"
 #include "opencv2/highgui.hpp"
-#include "opencv2/core/utility.hpp"
+#include "opencv2/gpu/gpu.hpp"
+//#include "opencv2/imgcodecs.hpp"
+//#include "opencv2/core/utility.hpp"
+//#include "opencv2/core/cuda.hpp"
+
 #define  __OPENCV_
 
 extern "C" {
@@ -34,6 +37,8 @@ extern "C" {
 #ifndef _DEBUG
 #define USE_MULTI_THREAD
 #endif
+
+//#define USE_OPENCV_GPU
 
 #define _TEST_MODULE
 

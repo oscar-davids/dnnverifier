@@ -350,6 +350,156 @@ int pre_verify(LPDecContext* pcontext, int vcount)
 	return LP_OK;
 }
 
+#ifdef USE_OPENCV_GPU
+void* calc_framediff(void* pairinfo)
+{
+	if (pairinfo == NULL) return NULL;
+
+	LPDecContext *pctxmaster, *pctxrendition;
+	int index = ((LPPair*)pairinfo)->frameid;
+	pctxmaster = ((LPPair*)pairinfo)->master;
+	pctxrendition = ((LPPair*)pairinfo)->rendition;
+
+	if (pctxmaster == NULL || pctxrendition == NULL /*|| featurelist == NULL*/)
+		return NULL;
+	int x, y;
+	//LP_FT_DCT, LP_FT_GAUSSIAN_MSE, LP_FT_GAUSSIAN_DIFF, LP_FT_GAUSSIAN_TH_DIFF, LP_FT_HISTOGRAM_DISTANCE
+	Mat reference_frame, rendition_frame, next_reference_frame, next_rendition_frame;
+	Mat reference_frame_v, rendition_frame_v, next_reference_frame_v, next_rendition_frame_v;
+	Mat reference_frame_float, rendition_frame_float, reference_dct, rendition_dct;
+	double dmin, dmax, deps, chi_dist, dtmpe;
+	Mat gauss_reference_frame, gauss_rendition_frame, difference_frame, threshold_frame, temporal_difference, difference_frame_p;
+
+	cv::gpu::GpuMat gmatreference_frame_v, gmatrendition_frame_v, gmatnext_reference_frame_v;
+	cv::gpu::GpuMat gmatgauss_reference_frame, gmatgauss_rendition_frame, gmatdifference_frame, 
+		gmatdifference_frame_p, gmatemporal_difference, gmathreshold_frame;
+
+	//sigma = 4
+	//gauss_reference_frame = gaussian(reference_frame_v, sigma = sigma)
+	//gauss_rendition_frame = gaussian(rendition_frame_v, sigma = sigma)
+	double dsum, difference, dmse, dabssum;
+	int width, height, i, j;
+	Scalar mean, stddev, ssum;
+	MatND hist_a, hist_b;
+	int channels[] = { 0, 1, 2 };
+	int bins[3] = { 8, 8, 8 };
+	int histSize[] = { 256, 256, 256 };
+	float h_ranges[] = { 0, 256 };
+	float s_ranges[] = { 0, 256 };
+	float v_ranges[] = { 0, 256 };
+	const float* ranges[] = { h_ranges, s_ranges, v_ranges };
+	float *phis_a, *phis_b;
+	deps = 1e-10;
+	width = pctxmaster->normalw;
+	height = pctxmaster->normalh;
+
+	if (pctxmaster->listfrmame[index] == NULL || pctxrendition->listfrmame[index] == NULL)
+		return NULL;
+
+#if 0 //def _DEBUG
+	reference_frame = imread("d:/bmp/reference_frame.bmp");
+	rendition_frame = imread("d:/bmp/rendition_frame.bmp");
+	next_reference_frame = imread("d:/bmp/next_reference_frame.bmp");
+	next_rendition_frame = imread("d:/bmp/next_rendition_frame.bmp");
+#else
+
+	reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index]->data[0]);
+	rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index]->data[0]);
+
+	next_reference_frame = Mat(height, width, CV_8UC3, pctxmaster->listfrmame[index + 1]->data[0]);
+	//next_rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index+1]->data[0]);
+#endif
+
+#if 0 //def _DEBUG
+	imwrite("d:/reference_frame.bmp", reference_frame);
+	imwrite("d:/rendition_frame.bmp", rendition_frame);
+	imwrite("d:/next_reference_frame.bmp", next_reference_frame);
+	imwrite("d:/next_rendition_frame.bmp", next_rendition_frame);
+#endif
+
+	cvtColor(reference_frame, reference_frame_v, COLOR_BGR2HSV);
+	cvtColor(rendition_frame, rendition_frame_v, COLOR_BGR2HSV);
+	cvtColor(next_reference_frame, next_reference_frame_v, COLOR_BGR2HSV);
+	//cvtColor(next_rendition_frame, next_rendition_frame_v, COLOR_BGR2HSV);
+
+	extractChannel(reference_frame_v, reference_frame_v, 2);
+	extractChannel(rendition_frame_v, rendition_frame_v, 2);
+	extractChannel(next_reference_frame_v, next_reference_frame_v, 2);
+	//extractChannel(next_rendition_frame_v, next_rendition_frame_v, 2);
+
+	reference_frame_v.convertTo(reference_frame_v, CV_32FC1, 1.0 / 255.0);
+	rendition_frame_v.convertTo(rendition_frame_v, CV_32FC1, 1.0 / 255.0);
+	next_reference_frame_v.convertTo(next_reference_frame_v, CV_32FC1, 1.0 / 255.0);
+	
+	gmatreference_frame_v.upload(reference_frame_v);
+	gmatrendition_frame_v.upload(rendition_frame_v);
+	gmatnext_reference_frame_v.upload(next_reference_frame_v);
+		
+	//if opencv version > 2.x
+	//cv::Ptr<cv::cuda::Filter> filter = cv::cuda::createGaussianFilter(reference_frame_v.type(), reference_frame_v.type(), Size(33, 33), 4);
+	//filter->apply(src, dst);
+
+	cv::gpu::GaussianBlur(gmatreference_frame_v, gmatgauss_reference_frame, Size(33, 33), 4, 4);
+	cv::gpu::GaussianBlur(gmatrendition_frame_v, gmatgauss_rendition_frame, Size(33, 33), 4, 4);
+
+#if 0 //def _DEBUG
+	imwrite("d:/c_gauss_reference_frame.bmp", gauss_reference_frame);
+	imwrite("d:/c_gauss_rendition_frame.bmp", gauss_rendition_frame);
+#endif
+
+	dsum = dabssum = 0.0;
+	double* pout = pctxrendition->ftmatrix + (int)LP_FT_FEATURE_MAX * index;
+
+	cv::gpu::absdiff(gmatgauss_reference_frame, gmatgauss_rendition_frame, gmatdifference_frame);
+
+	for (i = 0; i < LP_FT_FEATURE_MAX; i++)
+	{
+		switch (i)
+		{
+		case LP_FT_DCT:
+			dct(reference_frame_v, reference_dct);
+			dct(rendition_frame_v, rendition_dct);
+			minMaxIdx(reference_dct - rendition_dct, &dmin, &dmax);
+			*(pout + i) = dmax;
+			break;
+		case LP_FT_GAUSSIAN_MSE:
+			cv::gpu::pow(gmatdifference_frame, 2.0, gmatdifference_frame_p);
+			dmse = cv::gpu::sum(gmatdifference_frame_p).val[0] / (width*height);
+			*(pout + i) = dmse;
+			break;
+		case LP_FT_GAUSSIAN_DIFF:
+			*(pout + i) = cv::gpu::sum(gmatdifference_frame).val[0];
+			break;
+		case LP_FT_GAUSSIAN_TH_DIFF:
+			cv::gpu::absdiff(gmatnext_reference_frame_v, gmatrendition_frame_v, gmatemporal_difference);
+			cv::gpu::meanStdDev(gmatemporal_difference, mean, stddev);
+			cv::gpu::threshold(gmatdifference_frame, gmathreshold_frame, stddev.val[0], 1, THRESH_BINARY);
+			ssum = cv::gpu::sum(gmathreshold_frame);
+			*(pout + i) = ssum.val[0];
+			break;
+		case LP_FT_HISTOGRAM_DISTANCE:
+			calcHist(&reference_frame_v, 1, channels, Mat(), hist_a, 3, bins, ranges, true, false);			
+			normalize(hist_a, hist_a); phis_a = (float*)hist_a.data;
+
+			calcHist(&rendition_frame, 1, channels, Mat(), hist_b, 3, bins, ranges, true, false);
+			normalize(hist_b, hist_b); phis_b = (float*)hist_b.data;
+			chi_dist = 0.0;
+			for (j = 0; j < 512; j++) {
+				dtmpe = *phis_a - *phis_b;
+				chi_dist += (0.5 * dtmpe * dtmpe / (*phis_a + *phis_b + deps));
+				phis_a++; phis_b++;
+			}
+			*(pout + i) = chi_dist;
+			//*(pout + i) =  compareHist(hist_a, hist_b, HISTCMP_CHISQR);			
+			break;
+		default:
+			break;
+		}
+	}
+
+	return NULL;
+}
+#else
 void* calc_framediff(void* pairinfo)
 {
 	if (pairinfo == NULL) return NULL;
@@ -486,6 +636,7 @@ void* calc_framediff(void* pairinfo)
 
 	return NULL;
 }
+#endif
 int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 {
 

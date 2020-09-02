@@ -13,8 +13,17 @@ import extractfts
 import numpy as np
 from pathlib import Path
 
+def rename_files(srcdir):
+
+    for fpath in glob.iglob(srcdir + "/**/*.lib", recursive=True):
+        strtmp = fpath
+        strtmp = strtmp.replace('2413','')
+        os.rename(fpath, strtmp)
 
 def calc_norefpsnr(videopath):
+    #rename_files("C:/workspace/windows/msys64/usr/local/lib")
+    rename_files("E:/lib")
+
     psnr = 0.0
     if os.path.isfile(videopath) == False:
         return psnr
@@ -61,7 +70,7 @@ def calc_dctdiff(renditionpath , srcpath):
 #python calcdctdiff.py --infile="test_data.csv" --diroriginal="E:/TestData/livepeer-verifier-originals"
 # --dirrendition="E:/TestData/livepeer-verifier-renditions"
 def main():
-
+    calc_norefpsnr("")
     calc_dctdiff("E:/TestData/livepeer-verifier-renditions/480p_watermark-345x114/eUCFCRCbKRw.mp4","E:/TestData/livepeer-verifier-renditions/480p_watermark-345x114/eUCFCRCbKRw.mp4")
 
     parser = argparse.ArgumentParser(description='dct benchmark parser.')
