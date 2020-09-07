@@ -22,6 +22,7 @@
     <ClCompile Include="bmpio.cpp" />
     <ClCompile Include="calcmatrix.cpp" />
     <ClCompile Include="extractfts.cpp" />
+    <ClCompile Include="gaussian.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="bmpio.h" />
