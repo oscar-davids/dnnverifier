@@ -313,7 +313,7 @@ int grab_allframes(LPDecContext* pcontext, int ncount)
 	}
 	
 	//run grabber thread , here grabber all frames based on time
-#ifdef USE_MULTI_THREAD
+#if USE_MULTI_THREAD
 	for (i = 0; i < ncount; i++) {
 		if (pthread_create(&threads[i], NULL, decode_frames, (void *)&pcontext[i])) {
 			fprintf(stderr, "Error create thread id %d\n", i);
@@ -350,8 +350,8 @@ int pre_verify(LPDecContext* pcontext, int vcount)
 	return LP_OK;
 }
 
-#ifdef USE_OPENCV_GPU
-void* calc_framediff(void* pairinfo)
+#if USE_OPENCV_GPU
+void* calc_framediffcuda(void* pairinfo)
 {
 	if (pairinfo == NULL) return NULL;
 
@@ -373,7 +373,7 @@ void* calc_framediff(void* pairinfo)
 	cv::gpu::GpuMat gmatreference_frame_v, gmatrendition_frame_v, gmatnext_reference_frame_v;
 	cv::gpu::GpuMat gmatgauss_reference_frame, gmatgauss_rendition_frame, gmatdifference_frame, 
 		gmatdifference_frame_p, gmatemporal_difference, gmathreshold_frame;
-
+	cv::gpu::GpuMat gmatreference_dct, gmatrendition_dct, gmatdiff_dct;
 	//sigma = 4
 	//gauss_reference_frame = gaussian(reference_frame_v, sigma = sigma)
 	//gauss_rendition_frame = gaussian(rendition_frame_v, sigma = sigma)
@@ -439,6 +439,9 @@ void* calc_framediff(void* pairinfo)
 	//cv::Ptr<cv::cuda::Filter> filter = cv::cuda::createGaussianFilter(reference_frame_v.type(), reference_frame_v.type(), Size(33, 33), 4);
 	//filter->apply(src, dst);
 
+	//cv::gpu::GaussianBlur(gmatreference_frame_v, gmatgauss_reference_frame, Size(33, 33), 4, 4);
+	//cv::gpu::GaussianBlur(gmatrendition_frame_v, gmatgauss_rendition_frame, Size(33, 33), 4, 4);
+
 	cv::gpu::GaussianBlur(gmatreference_frame_v, gmatgauss_reference_frame, Size(33, 33), 4, 4);
 	cv::gpu::GaussianBlur(gmatrendition_frame_v, gmatgauss_rendition_frame, Size(33, 33), 4, 4);
 
@@ -456,11 +459,12 @@ void* calc_framediff(void* pairinfo)
 	{
 		switch (i)
 		{
-		case LP_FT_DCT:
-			dct(reference_frame_v, reference_dct);
-			dct(rendition_frame_v, rendition_dct);
-			minMaxIdx(reference_dct - rendition_dct, &dmin, &dmax);
-			*(pout + i) = dmax;
+		case LP_FT_DCT:			
+			cv::gpu::dct2d(gmatreference_frame_v, gmatreference_dct);
+			cv::gpu::dct2d(gmatrendition_frame_v, gmatrendition_dct);
+			cv::gpu::subtract(gmatreference_dct, gmatrendition_dct, gmatdiff_dct);
+			cv::gpu::minMax(gmatdiff_dct, &dmin, &dmax);
+			*(pout + i) = dmax;			
 			break;
 		case LP_FT_GAUSSIAN_MSE:
 			cv::gpu::pow(gmatdifference_frame, 2.0, gmatdifference_frame_p);
@@ -471,14 +475,19 @@ void* calc_framediff(void* pairinfo)
 			*(pout + i) = cv::gpu::sum(gmatdifference_frame).val[0];
 			break;
 		case LP_FT_GAUSSIAN_TH_DIFF:
-			cv::gpu::absdiff(gmatnext_reference_frame_v, gmatrendition_frame_v, gmatemporal_difference);
-			cv::gpu::meanStdDev(gmatemporal_difference, mean, stddev);
-			cv::gpu::threshold(gmatdifference_frame, gmathreshold_frame, stddev.val[0], 1, THRESH_BINARY);
-			ssum = cv::gpu::sum(gmathreshold_frame);
+			//cv::gpu::absdiff(gmatnext_reference_frame_v, gmatrendition_frame_v, gmatemporal_difference);
+			//cv::gpu::meanStdDev(gmatemporal_difference, mean, stddev);
+			//cv::gpu::threshold(gmatdifference_frame, gmathreshold_frame, stddev.val[0], 1, THRESH_BINARY);
+			//ssum = cv::gpu::sum(gmathreshold_frame);
+			//*(pout + i) = ssum.val[0];
+			absdiff(next_reference_frame_v, rendition_frame_v, temporal_difference);
+			meanStdDev(temporal_difference, mean, stddev);
+			threshold(difference_frame, threshold_frame, stddev.val[0], 1, THRESH_BINARY);
+			ssum = sum(threshold_frame);
 			*(pout + i) = ssum.val[0];
 			break;
 		case LP_FT_HISTOGRAM_DISTANCE:
-			calcHist(&reference_frame_v, 1, channels, Mat(), hist_a, 3, bins, ranges, true, false);			
+			calcHist(&reference_frame, 1, channels, Mat(), hist_a, 3, bins, ranges, true, false);
 			normalize(hist_a, hist_a); phis_a = (float*)hist_a.data;
 
 			calcHist(&rendition_frame, 1, channels, Mat(), hist_b, 3, bins, ranges, true, false);
@@ -499,7 +508,8 @@ void* calc_framediff(void* pairinfo)
 
 	return NULL;
 }
-#else
+#endif
+
 void* calc_framediff(void* pairinfo)
 {
 	if (pairinfo == NULL) return NULL;
@@ -636,7 +646,7 @@ void* calc_framediff(void* pairinfo)
 
 	return NULL;
 }
-#endif
+
 int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 {
 
@@ -653,7 +663,7 @@ int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 		pairinfo[i].rendition = pctxrendition;
 		pairinfo[i].frameid = i;
 	}
-#ifdef USE_MULTI_THREAD
+#if USE_MULTI_THREAD
 	for (i = 0; i < ncount; i++) {
 		if (pthread_create(&threads[i], NULL, calc_framediff, (void *)&pairinfo[i])) {
 			fprintf(stderr, "Error create thread id %d\n", i);
@@ -675,6 +685,47 @@ int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 
 	return LP_OK;
 }
+#if USE_OPENCV_GPU
+int calc_featurematrixcuda(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
+{
+
+	int i, ncount;
+	pthread_t threads[MAX_NUM_THREADS];
+	//make feature matrix(feature * samplecount)
+
+	pctxrendition->ftmatrix = (double*)malloc(sizeof(double) * 5 * pctxrendition->samplecount);
+	ncount = pctxrendition->samplecount - 1;
+	LPPair* pairinfo = (LPPair*)malloc(sizeof(LPPair) * ncount);
+	for (i = 0; i < ncount; i++)
+	{
+		pairinfo[i].master = pctxmaster;
+		pairinfo[i].rendition = pctxrendition;
+		pairinfo[i].frameid = i;
+	}
+#if USE_MULTI_THREAD
+	for (i = 0; i < ncount; i++) {
+		if (pthread_create(&threads[i], NULL, calc_framediffcuda, (void *)&pairinfo[i])) {
+			fprintf(stderr, "Error create thread id %d\n", i);
+		}
+	}
+	for (i = 0; i < ncount; i++) {
+		if (pthread_join(threads[i], NULL)) {
+			fprintf(stderr, "Error joining thread id %d\n", i);
+		}
+	}
+#else
+	for (int i = 0; i < pctxrendition->samplecount - 1; i++)
+	{
+		calc_framediffcuda((void *)&pairinfo[i]);
+	}
+#endif
+	if (pairinfo)
+		free(pairinfo);
+
+	return LP_OK;
+}
+#endif
+
 int aggregate_matrix(LPDecContext* pctxrendition)
 {	
 	double* pout = pctxrendition->ftmatrix;
@@ -892,6 +943,21 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 }
 #endif
 
+void debug_printmatrix(LPDecContext* lpcontext, int videonum)
+{
+	int i;
+	for (i = 1; i < videonum; i++) {
+		LPDecContext* ptmpcontext = lpcontext + i;
+		double* pout = ptmpcontext->ftmatrix;
+		fprintf(stderr, "aggregate(%d) :", ptmpcontext->samplecount - 1);
+		for (int j = 0; j < LP_FT_FEATURE_MAX; j++)
+		{
+			fprintf(stderr, "%12.6f ", *(pout + j));
+		}
+		fprintf(stderr, "\n");
+	}
+}
+
 #ifdef _DEBUG
 void debug_saveimage(LPDecContext* lpcontext, int videonum)
 {
@@ -942,18 +1008,5 @@ void debug_printvframe(LPDecContext* lpcontext, int videonum)
 		}
 	}
 }
-void debug_printmatrix(LPDecContext* lpcontext, int videonum)
-{
-	int i;
-	for (i = 1; i < videonum; i++) {
-		LPDecContext* ptmpcontext = lpcontext + i;
-		double* pout = ptmpcontext->ftmatrix;
-		fprintf(stderr, "aggregate(%d) :", ptmpcontext->samplecount - 1);
-		for (int j = 0; j < LP_FT_FEATURE_MAX; j++)
-		{
-			fprintf(stderr, "%lf ", *(pout + j));
-		}
-		fprintf(stderr, "\n");
-	}	
-}
+
 #endif

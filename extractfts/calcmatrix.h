@@ -34,11 +34,9 @@ extern "C" {
 #define MAX_PATH 256
 #endif
 
-#ifndef _DEBUG
-#define USE_MULTI_THREAD
-#endif
+#define USE_MULTI_THREAD	0 //use 1, use 0 
 
-//#define USE_OPENCV_GPU
+#define USE_OPENCV_GPU		1 //use 1, use 0 	
 
 #define _TEST_MODULE
 
@@ -150,13 +148,17 @@ void close_context(LPDecContext* lpcontext);
 int pre_verify(LPDecContext* pcontext, int vcount);
 int grab_allframes(LPDecContext* pcontext, int ncount);
 void remove_nullframe(LPDecContext* pcontext, int nvideonum);
-int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition);
 int aggregate_matrix(LPDecContext* pctxrendition);
+int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition);
+#if USE_OPENCV_GPU
+int calc_featurematrixcuda(LPDecContext* pctxmaster, LPDecContext* pctxrendition);
+#endif
+
+void debug_printmatrix(LPDecContext* lpcontext, int videonum);
 
 #ifdef _DEBUG
 void debug_saveimage(LPDecContext* lpcontext, int videonum);
 void debug_printvframe(LPDecContext* lpcontext, int videonum);
-void debug_printmatrix(LPDecContext* lpcontext, int videonum);
 #endif
 
 #endif //_CALC_MATRIX_H

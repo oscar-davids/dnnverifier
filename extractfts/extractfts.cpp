@@ -119,6 +119,28 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 				ptmpcontext->audiodiff = adiff;
 		}
 	}
+
+#if USE_OPENCV_GPU
+	if (pcontext->alivevideo) {
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			calc_featurematrixcuda(pcontext, ptmpcontext);
+		}
+	}
+
+	//aggregate matrix
+	if (pcontext->alivevideo) {
+		for (i = 1; i < nvideonum; i++) {
+			ptmpcontext = pcontext + i;
+			aggregate_matrix(ptmpcontext);
+		}
+	}
+
+#if 1 //def _DEBUG
+	debug_printmatrix(pcontext, nvideonum);
+#endif	
+
+#else // CPU mode	
 	//calculate vframe matrix
 	if (pcontext->alivevideo) {
 		for (i = 1; i < nvideonum; i++) {
@@ -134,10 +156,13 @@ int calc_featurediff(char* srcpath, char* renditions, int samplenum)
 			aggregate_matrix(ptmpcontext);
 		}
 	}
-
-#ifdef 	_DEBUG
+#if 1 //def _DEBUG
 	debug_printmatrix(pcontext, nvideonum);
 #endif	
+
+#endif
+
+
 	//make python matrix and return		
 	//matirx column is [metatamper, videoalive, audioalive, fps, width, height, audiodiff, sizeratio, dctdiff, gaussiamse, gaussiandiff, gaussianthreshold, histogramdiff]
 #ifdef Py_PYTHON_H
