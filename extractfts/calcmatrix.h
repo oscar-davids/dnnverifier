@@ -36,8 +36,26 @@ extern "C" {
 
 #define USE_MULTI_THREAD	0 //use 1, use 0 
 
-#define USE_OPENCV_GPU		1 //use 1, use 0 	
+#define USE_OPENCV_GPU		1 //use 1, use 0
 
+#define TEST_CV_ACCURACY	1 //use 1, use 0
+
+#if TEST_CV_ACCURACY
+#define USE_OPENCV_READ		1 //use 1, use 0
+#define USE_OPENCV_WRITE	1 //use 1, use 0
+#define USE_DEBUG_BMP		0 //use 1, use 0
+
+#if USE_OPENCV_READ
+#undef USE_OPENCV_WRITE
+#endif
+
+#if USE_OPENCV_WRITE
+#undef USE_OPENCV_READ
+#endif 
+
+#endif //TEST_CV_ACCURACY
+
+#define GPU_TEST_MODULE 0
 #define _TEST_MODULE
 
 #ifndef _TEST_MODULE

@@ -48,7 +48,7 @@ typedef struct tagRGBQUAD {
 extern int WriteBinaryBmp(char* bmpFileName, int width, int height, unsigned char *greyimg);
 extern int WriteGreyBmp(char* bmpFileName, int width, int height, unsigned char *greyimg);
 extern int WriteColorBmp(char *bmpFileName, int width, int height, unsigned char *colorimg);
-extern int WriteFloatBmp(char* bmpFileName, int width, int height, float *greyimg);
+extern int WriteFloatBmp(const char* bmpFileName, int width, int height, float *greyimg);
 extern int WriteShortBmp(char* bmpFileName, int width, int height, short *greyimg);
 
 #endif

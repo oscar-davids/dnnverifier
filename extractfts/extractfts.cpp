@@ -1556,6 +1556,8 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 }
 
 #ifdef _TEST_MODULE	
+#if GPU_TEST_MODULE
+#else // cpu test mode 
 int main(int argc, char **argv)
 {
     int ret = 0;
@@ -1607,7 +1609,7 @@ int main(int argc, char **argv)
 		
 
 	clock_t begin = clock();
-	int ntestcount = 100;
+	int ntestcount = 10;
 
 	for (int i = 0; i < ntestcount; i++) {
 		calc_featurediff((char*)src_filename, renditions, 10);
@@ -1619,6 +1621,8 @@ int main(int argc, char **argv)
 
 	return 0;
 }
+#endif
+
 #else //python
 
 static PyObject *get_num_gops(PyObject *self, PyObject *args)

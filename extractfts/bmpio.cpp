@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <float.h>
 #include "bmpio.h"
 
 //#define _TO_REAL_DRIVE_ ('e')
@@ -224,12 +225,12 @@ int WriteColorBmp(char *bmpFileName, int width, int height, unsigned char *color
 
 	return 0;
 }
-int WriteFloatBmp(char* bmpFileName, int width, int height, float *greyimg)
+int WriteFloatBmp(const char* bmpFileName, int width, int height, float *greyimg)
 {
 	int y, x;
 	unsigned char *greybuff = (unsigned char *)malloc(width*height);
-	float fmax = -1000000.0;
-	float fmin = 1000000.0;
+	float fmax = FLT_MIN;// -1000000.0;
+	float fmin = FLT_MAX;// 1000000.0;
 	for (y = 0; y < width * height; y++)
 	{
 		if (greyimg[y] > fmax) fmax = greyimg[y];
@@ -239,10 +240,10 @@ int WriteFloatBmp(char* bmpFileName, int width, int height, float *greyimg)
 	float fscale = 255.0 / (fmax - fmin);
 	for (y = 0; y < width * height; y++)
 	{
-		greybuff[y] = (unsigned char)((float)(greyimg[y] - fmin))* fscale;
+		greybuff[y] = (unsigned char)(((float)(greyimg[y] - fmin))* fscale);
 	}
 
-	WriteGreyBmp(bmpFileName, width, height, greybuff);
+	WriteGreyBmp((char*)bmpFileName, width, height, greybuff);
 
 	if (greybuff) free(greybuff);
 
