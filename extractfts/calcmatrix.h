@@ -1,6 +1,40 @@
 #ifndef _CALC_MATRIX_H
 #define _CALC_MATRIX_H
 
+//debug and test compile options
+#define USE_MULTI_THREAD	1 //use 1, use 0 
+
+#define USE_OPENCV_GPU		1 //use 1, use 0
+
+#define TEST_OPENCV_GPUAPI	1 //use 1, use 0
+
+#define USE_CUDA_OPTIMIZED	1 //use 1, use 0
+
+#define TEST_CV_ACCURACY	1 //use 1, use 0
+
+#if (USE_OPENCV_GPU == 0)
+#define USE_CUDA_OPTIMIZED	0
+#define TEST_OPENCV_GPUAPI	0
+#endif
+
+#if TEST_CV_ACCURACY
+#define USE_OPENCV_READ		1 //use 1, use 0
+#define USE_OPENCV_WRITE	1 //use 1, use 0
+#define USE_DEBUG_BMP		0 //use 1, use 0
+
+#if USE_OPENCV_READ
+#undef USE_OPENCV_WRITE
+#endif
+
+#if USE_OPENCV_WRITE
+#undef USE_OPENCV_READ
+#endif 
+
+#endif //TEST_CV_ACCURACY
+
+#define GPU_TEST_MODULE 0
+#define _TEST_MODULE
+
 #ifdef __cplusplus
 
 #include "opencv2/imgproc.hpp"
@@ -14,6 +48,10 @@
 
 extern "C" {
 #endif
+
+#if TEST_OPENCV_GPUAPI
+#include <opencv2/imgproc/imgproc_c.h>
+#endif //TEST_OPENCV_GPUAPI
 
 #include <libavutil/motion_vector.h>
 #include <libavformat/avformat.h>
@@ -34,29 +72,6 @@ extern "C" {
 #define MAX_PATH 256
 #endif
 
-#define USE_MULTI_THREAD	0 //use 1, use 0 
-
-#define USE_OPENCV_GPU		1 //use 1, use 0
-
-#define TEST_CV_ACCURACY	1 //use 1, use 0
-
-#if TEST_CV_ACCURACY
-#define USE_OPENCV_READ		1 //use 1, use 0
-#define USE_OPENCV_WRITE	1 //use 1, use 0
-#define USE_DEBUG_BMP		0 //use 1, use 0
-
-#if USE_OPENCV_READ
-#undef USE_OPENCV_WRITE
-#endif
-
-#if USE_OPENCV_WRITE
-#undef USE_OPENCV_READ
-#endif 
-
-#endif //TEST_CV_ACCURACY
-
-#define GPU_TEST_MODULE 0
-#define _TEST_MODULE
 
 #ifndef _TEST_MODULE
 #include <Python.h>
@@ -87,6 +102,7 @@ typedef enum errorType {
 	LP_ERROR_MAX,
 } errorType;
 
+/*
 typedef enum featureType {
 	LP_FT_DCT = 0,
 	LP_FT_GAUSSIAN_MSE,
@@ -95,7 +111,7 @@ typedef enum featureType {
 	LP_FT_HISTOGRAM_DISTANCE,
 	LP_FT_FEATURE_MAX,
 } featureType;
-
+*/
 
 // define structure
 typedef struct LPDecContext {

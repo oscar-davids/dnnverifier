@@ -903,6 +903,73 @@ int calc_featurematrix(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 int calc_featurematrixcuda(LPDecContext* pctxmaster, LPDecContext* pctxrendition)
 {
 
+#if TEST_OPENCV_GPUAPI
+#define MAX_SEGMENT_TIME	6	//6 second segment
+#define MAX_SAMPLE_NUM		18	//18 randomize index
+#define CKNUM_PER_SEC		3	//check frame count per second
+#define NORMAL_WIDTH		480	//normalize width
+#define NORMAL_HEIGHT		270	//normalize height
+#define MAX_FEATURE_NUM		5	//final score array
+
+	FramePairList	compInfo;
+	int i;
+
+	
+	compInfo.width = pctxmaster->width;
+	compInfo.height = pctxmaster->height;
+	compInfo.normalw = NORMAL_WIDTH;
+	compInfo.normalh = NORMAL_HEIGHT;
+	compInfo.featurecount = MAX_FEATURE_NUM;
+	compInfo.listmain = (void**)malloc(sizeof(void*)*MAX_SAMPLE_NUM);
+	compInfo.listref = (void**)malloc(sizeof(void*)*MAX_SAMPLE_NUM);
+	compInfo.samplecount = 0;
+
+	for (i = 0; i < pctxrendition->samplecount; i++)
+	{
+		void* ptmp = (void*)malloc(pctxmaster->normalw*pctxmaster->normalh * 3);
+		memcpy(ptmp, pctxmaster->listfrmame[i]->data[0], pctxmaster->normalw*pctxmaster->normalh * 3);
+		compInfo.listmain[compInfo.samplecount] = ptmp;
+
+		ptmp = (void*)malloc(pctxmaster->normalw*pctxmaster->normalh * 3);
+		memcpy(ptmp, pctxrendition->listfrmame[i]->data[0], pctxmaster->normalw*pctxmaster->normalh * 3);
+		compInfo.listref[compInfo.samplecount] = ptmp;
+
+		compInfo.samplecount++;
+	}
+	if (compInfo.samplecount > 0) {
+
+		pctxrendition->ftmatrix = (double*)malloc(sizeof(double) * 5 * pctxrendition->samplecount);
+		//call opencv api at here
+
+		//creat feature matrix(feature * samplecount)	
+		compInfo.diffmatrix = (double*)malloc(sizeof(double) * compInfo.featurecount * compInfo.samplecount);
+		memset(compInfo.diffmatrix, 0x00, sizeof(double) * compInfo.featurecount * compInfo.samplecount);
+		//creat final score buffer
+		compInfo.finalscore = (double*)malloc(sizeof(double)*compInfo.featurecount);
+
+		//cvCalcDiffMatrix((void*)&compInfo);
+		cvCalcDiffMatrixwithCuda((void*)&compInfo);
+
+		//debug oscar
+		av_log(NULL, AV_LOG_ERROR, "do_lvpdiff comapare frame count %d\n", compInfo.samplecount);
+		for (i = 0; i < compInfo.featurecount; i++) {
+			av_log(NULL, AV_LOG_ERROR, "feature(%d) = %lf\n", i, compInfo.finalscore[i]);
+		}
+		//free buffer
+		for (i = 0; i < compInfo.samplecount; i++) {
+			if (compInfo.listmain[i]) free(compInfo.listmain[i]);
+			if (compInfo.listref[i]) free(compInfo.listref[i]);
+		}
+		
+		memcpy(pctxrendition->ftmatrix, compInfo.diffmatrix, sizeof(double) * 5 * pctxrendition->samplecount);
+
+		if (compInfo.diffmatrix) free(compInfo.diffmatrix);
+		if (compInfo.finalscore) free(compInfo.finalscore);
+	}
+	if (compInfo.listmain) free(compInfo.listmain);
+	if (compInfo.listref) free(compInfo.listref);
+
+#else
 	int i, ncount;
 	pthread_t threads[MAX_NUM_THREADS];
 	//make feature matrix(feature * samplecount)
@@ -918,7 +985,12 @@ int calc_featurematrixcuda(LPDecContext* pctxmaster, LPDecContext* pctxrendition
 	}
 #if USE_MULTI_THREAD
 	for (i = 0; i < ncount; i++) {
-		if (pthread_create(&threads[i], NULL, calc_framediffcuda, (void *)&pairinfo[i])) {
+#if USE_CUDA_OPTIMIZED
+		if (pthread_create(&threads[i], NULL, calc_framediffcuda_opt, (void *)&pairinfo[i]))
+#else
+		if (pthread_create(&threads[i], NULL, calc_framediffcuda, (void *)&pairinfo[i]))
+#endif
+		{
 			fprintf(stderr, "Error create thread id %d\n", i);
 		}
 	}
@@ -930,11 +1002,16 @@ int calc_featurematrixcuda(LPDecContext* pctxmaster, LPDecContext* pctxrendition
 #else
 	for (int i = 0; i < pctxrendition->samplecount - 1; i++)
 	{
+#if USE_CUDA_OPTIMIZED
 		calc_framediffcuda_opt((void *)&pairinfo[i]);
+#else
+		calc_framediffcuda((void *)&pairinfo[i]);
+#endif
 	}
 #endif
 	if (pairinfo)
 		free(pairinfo);
+#endif
 
 	return LP_OK;
 }
