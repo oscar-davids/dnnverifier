@@ -361,6 +361,84 @@ struct BufferGpuDiff                                     // Optimized GPU versio
 
 BufferGpuDiff BufGpuCalc[MAX_NUM_THREADS];
 
+//some test
+double getPSNR_CPU(const Mat& I1, const Mat& I2)
+{
+	Mat s1;
+	absdiff(I1, I2, s1);       // |I1 - I2|
+	s1.convertTo(s1, CV_32F);  // cannot make a square on 8 bits
+	s1 = s1.mul(s1);           // |I1 - I2|^2
+
+	Scalar s = sum(s1);         // sum elements per channel
+
+	double sse = s.val[0] + s.val[1] + s.val[2]; // sum channels
+
+	if (sse <= 1e-10) // for small values return zero
+		return 0;
+	else
+	{
+		double  mse = sse / (double)(I1.channels() * I1.total());
+		double psnr = 10.0*log10((255 * 255) / mse);
+		return psnr;
+	}
+}
+
+double getPSNR_CUDA(const Mat& I1, const Mat& I2)
+{
+	cv::gpu::GpuMat gI1, gI2, gs, t1, t2;
+
+	gI1.upload(I1);
+	gI2.upload(I2);
+
+	gI1.convertTo(t1, CV_32F);
+	gI2.convertTo(t2, CV_32F);
+
+	cv::gpu::absdiff(t1.reshape(1), t2.reshape(1), gs);
+	cv::gpu::multiply(gs, gs, gs);
+
+	Scalar s = cv::gpu::sum(gs);
+	double sse = s.val[0] + s.val[1] + s.val[2];
+
+	if (sse <= 1e-10) // for small values return zero
+		return 0;
+	else
+	{
+		double  mse = sse / (double)(gI1.channels() * I1.total());
+		double psnr = 10.0*log10((255 * 255) / mse);
+		return psnr;
+	}
+}
+struct BufferPSNR                                     // Optimized CUDA versions
+{   // Data allocations are very expensive on CUDA. Use a buffer to solve: allocate once reuse later.
+	cv::gpu::GpuMat gI1, gI2, gs, t1, t2;
+
+	cv::gpu::GpuMat buf;
+};
+
+double getPSNR_CUDA_optimized(const Mat& I1, const Mat& I2, BufferPSNR& b)
+{
+	b.gI1.upload(I1);
+	b.gI2.upload(I2);
+
+	b.gI1.convertTo(b.t1, CV_32F);
+	b.gI2.convertTo(b.t2, CV_32F);
+
+	cv::gpu::absdiff(b.t1.reshape(1), b.t2.reshape(1), b.gs);
+	cv::gpu::multiply(b.gs, b.gs, b.gs);
+
+	double sse = cv::gpu::sum(b.gs, b.buf)[0];
+
+	if (sse <= 1e-10) // for small values return zero
+		return 0;
+	else
+	{
+		double mse = sse / (double)(I1.channels() * I1.total());
+		double psnr = 10.0*log10((255 * 255) / mse);
+		return psnr;
+	}
+}
+BufferPSNR bufferPSNR;
+
 void* calc_framediffcuda_opt(void* pairinfo)
 {
 	if (pairinfo == NULL) return NULL;
@@ -379,7 +457,7 @@ void* calc_framediffcuda_opt(void* pairinfo)
 	Mat reference_frame_float, rendition_frame_float, reference_dct, rendition_dct;
 	double dmin, dmax, deps, chi_dist, dtmpe;
 	Mat gauss_reference_frame, gauss_rendition_frame, difference_frame, threshold_frame, temporal_difference, difference_frame_p;
-
+	Mat tmp_frame;
 	//sigma = 4
 	//gauss_reference_frame = gaussian(reference_frame_v, sigma = sigma)
 	//gauss_rendition_frame = gaussian(rendition_frame_v, sigma = sigma)
@@ -442,6 +520,12 @@ void* calc_framediffcuda_opt(void* pairinfo)
 	//next_rendition_frame = Mat(height, width, CV_8UC3, pctxrendition->listfrmame[index+1]->data[0]);
 #endif
 
+	//spped test
+	//getPSNR_CPU(reference_frame, rendition_frame);
+	//getPSNR_CUDA(reference_frame, rendition_frame);
+	//getPSNR_CUDA_optimized(reference_frame, rendition_frame, bufferPSNR);
+	//return NULL;
+
 #if USE_OPENCV_WRITE
 	imwrite("d:/tmp/bmptest/reference_frame.bmp", reference_frame);
 	imwrite("d:/tmp/bmptest/rendition_frame.bmp", rendition_frame);
@@ -494,23 +578,29 @@ void* calc_framediffcuda_opt(void* pairinfo)
 		switch (i)
 		{
 		case LP_FT_DCT:
-#if 0
+#if 1
 			cv::gpu::dct2d(BufGpuCalc[index].gmatreference_frame_v, BufGpuCalc[index].gmatreference_dct);
 			cv::gpu::dct2d(BufGpuCalc[index].gmatrendition_frame_v, BufGpuCalc[index].gmatrendition_dct);
+
+			//cv::gpu::dft(BufGpuCalc[index].gmatreference_frame_v, BufGpuCalc[index].gmatreference_dct, BufGpuCalc[index].gmatreference_frame_v.size());
+			//cv::gpu::dft(BufGpuCalc[index].gmatrendition_frame_v, BufGpuCalc[index].gmatrendition_dct, BufGpuCalc[index].gmatrendition_frame_v.size());
 
 #if USE_DEBUG_BMP
 			//imwrite("d:/tmp/bmptest/gpu_gauss_reference_frame.bmp", gauss_reference_frame);
 			//imwrite("d:/tmp/bmptest/gpu_gauss_rendition_frame.bmp", gauss_rendition_frame);
+			
 			BufGpuCalc[index].gmatreference_dct.download(tmp_frame);
-			WriteFloatBmp("d:/tmp/bmptest/gpu_dct_reference_frame.bmp", 480, 270, (float*)tmp_frame.data);
+			WriteFloatBmp("d:/tmp/bmptest/gpu_dct_reference_frame.bmp", tmp_frame.cols, tmp_frame.rows, (float*)tmp_frame.data);
 			BufGpuCalc[index].gmatrendition_dct.download(tmp_frame);
-			WriteFloatBmp("d:/tmp/bmptest/gpu_dct_rendition_frame.bmp", 480, 270, (float*)tmp_frame.data);
+			WriteFloatBmp("d:/tmp/bmptest/gpu_dct_rendition_frame.bmp", tmp_frame.cols, tmp_frame.rows, (float*)tmp_frame.data);
 #endif
 			cv::gpu::subtract(BufGpuCalc[index].gmatreference_dct, BufGpuCalc[index].gmatrendition_dct, BufGpuCalc[index].gmatdiff_dct);
 			cv::gpu::minMax(BufGpuCalc[index].gmatdiff_dct, &dmin, &dmax);
 			*(pout + i) = dmax;
-#endif 
-			*(pout + i) = 0.0;
+			//*(pout + i) = 2.0;
+#else
+			*(pout + i) = 1.0;
+#endif
 			break;
 		case LP_FT_GAUSSIAN_MSE:
 			cv::gpu::pow(BufGpuCalc[index].gmatdifference_frame, 2.0, BufGpuCalc[index].gmatdifference_frame_p);
@@ -660,7 +750,8 @@ void* calc_framediffcuda(void* pairinfo)
 	{
 		switch (i)
 		{
-		case LP_FT_DCT:			
+		case LP_FT_DCT:
+
 			cv::gpu::dct2d(gmatreference_frame_v, gmatreference_dct);
 			cv::gpu::dct2d(gmatrendition_frame_v, gmatrendition_dct);
 

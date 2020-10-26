@@ -1609,7 +1609,7 @@ int main(int argc, char **argv)
 		
 
 	clock_t begin = clock();
-	int ntestcount = 10;
+	int ntestcount = 50;
 
 	for (int i = 0; i < ntestcount; i++) {
 		calc_featurediff((char*)src_filename, renditions, 10);

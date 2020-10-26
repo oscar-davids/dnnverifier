@@ -2,11 +2,12 @@
 #define _CALC_MATRIX_H
 
 //debug and test compile options
-#define USE_MULTI_THREAD	1 //use 1, use 0 
+
+
 
 #define USE_OPENCV_GPU		1 //use 1, use 0
 
-#define TEST_OPENCV_GPUAPI	1 //use 1, use 0
+#define TEST_OPENCV_GPUAPI	0 //use 1, use 0
 
 #define USE_CUDA_OPTIMIZED	1 //use 1, use 0
 
@@ -19,7 +20,7 @@
 
 #if TEST_CV_ACCURACY
 #define USE_OPENCV_READ		1 //use 1, use 0
-#define USE_OPENCV_WRITE	1 //use 1, use 0
+#define USE_OPENCV_WRITE	0 //use 1, use 0
 #define USE_DEBUG_BMP		0 //use 1, use 0
 
 #if USE_OPENCV_READ
@@ -49,9 +50,9 @@
 extern "C" {
 #endif
 
-#if TEST_OPENCV_GPUAPI
+//#if TEST_OPENCV_GPUAPI
 #include <opencv2/imgproc/imgproc_c.h>
-#endif //TEST_OPENCV_GPUAPI
+//#endif //TEST_OPENCV_GPUAPI
 
 #include <libavutil/motion_vector.h>
 #include <libavformat/avformat.h>
@@ -63,6 +64,8 @@ extern "C" {
 #ifdef __cplusplus
 	}
 #endif
+
+#define USE_MULTI_THREAD	0 //use 1, use 0 
 
 #ifndef NULL
 #define NULL 0
