@@ -192,7 +192,7 @@ void* decode_frames(void* parg)
 
 				if (context->sws_rgb_scale == NULL) {
 					context->sws_rgb_scale = sws_getContext(context->readframe->width, context->readframe->height, 
-						(AVPixelFormat)context->readframe->format, context->normalw, context->normalh, AV_PIX_FMT_BGR24,
+						(AVPixelFormat)context->readframe->format, context->normalw, context->normalh, AV_PIX_FMT_BGR24,						
 						SWS_BILINEAR, NULL, NULL, NULL);					
 				}
 				//check timestamp and add frame buffer
@@ -214,7 +214,7 @@ void* decode_frames(void* parg)
 					if (!ptmpframe)
 						return NULL;
 
-					ptmpframe->format = AV_PIX_FMT_RGB24;
+					ptmpframe->format = AV_PIX_FMT_BGR24;
 					ptmpframe->width = context->normalw;
 					ptmpframe->height = context->normalh;
 					ret = av_frame_get_buffer(ptmpframe, 0);
@@ -916,7 +916,8 @@ void* calc_framediff(void* pairinfo)
 			break;
 		case LP_FT_GAUSSIAN_MSE:
 			pow(difference_frame, 2.0, difference_frame_p);
-			dmse = sum(difference_frame_p).val[0] / (width*height);
+			dmse = cv::mean(difference_frame_p).val[0];
+			//dmse = sum(difference_frame_p).val[0] / (width*height);
 			*(pout + i) = dmse;
 			break;
 		case LP_FT_GAUSSIAN_DIFF:
@@ -1121,7 +1122,8 @@ int aggregate_matrix(LPDecContext* pctxrendition)
 
 		*poutstart = *poutstart / (pctxrendition->samplecount - 1);
 		//up scale values
-		*poutstart = *poutstart * pctxrendition->width * pctxrendition->height;		
+		if(j != LP_FT_GAUSSIAN_TH_DIFF)
+			*poutstart = *poutstart * pctxrendition->width * pctxrendition->height;		
 	}
 	return LP_OK;
 }

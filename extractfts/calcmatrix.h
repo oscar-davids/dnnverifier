@@ -5,7 +5,7 @@
 
 
 
-#define USE_OPENCV_GPU		1 //use 1, use 0
+#define USE_OPENCV_GPU		0 //use 1, use 0
 
 #define TEST_OPENCV_GPUAPI	0 //use 1, use 0
 
@@ -19,7 +19,7 @@
 #endif
 
 #if TEST_CV_ACCURACY
-#define USE_OPENCV_READ		1 //use 1, use 0
+#define USE_OPENCV_READ		0 //use 1, use 0
 #define USE_OPENCV_WRITE	0 //use 1, use 0
 #define USE_DEBUG_BMP		0 //use 1, use 0
 
