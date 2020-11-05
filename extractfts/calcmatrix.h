@@ -81,6 +81,9 @@ extern "C" {
 #include "numpy/arrayobject.h"
 #endif
 
+#define _AVPACKET_TEST
+//#define _CALCPSNR_TEST
+
 // define enum type
 /*
 typedef enum returnType {

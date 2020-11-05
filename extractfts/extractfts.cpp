@@ -1555,6 +1555,239 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 
 }
 
+static int getPacketposandlength(const char* fname, int gop_target, int* npos, int* plength)
+{
+#ifdef _TEST_MODULE
+	int ret = 0;
+	AVPacket pkt = { 0 };
+	int got_picture;
+	int cur_pos = 0;
+	AVFrame *pFrameBGR = NULL;
+	int *accu_src = NULL;
+	int *accu_src_old = NULL;
+	int nsuccess = 0;
+	AVCodec *dec;
+	AVCodecContext *dec_ctx = NULL;
+	int stream_idx = 0;
+
+	video_frame_count = 0;
+
+	int mb_stride, mb_sum, mb_type, mb_width, mb_height;
+
+	if (fname == NULL) return -1;
+
+	if (avformat_open_input(&fmt_ctx, fname, NULL, NULL) < 0) {
+		fprintf(stderr, "Could not open source file %s\n", fname);
+		return -1;
+	}
+
+	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+		fprintf(stderr, "Could not find stream information\n");
+		return -1;
+	}
+
+	ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
+	if (ret < 0) {
+		fprintf(stderr, "Could not find %s stream in input file '%s'\n",
+			av_get_media_type_string(AVMEDIA_TYPE_VIDEO), src_filename);
+		return ret;
+	}
+
+	stream_idx = ret;
+
+	dec_ctx = avcodec_alloc_context3(dec);
+
+	if (!dec_ctx) {
+		fprintf(stderr, "failed to allocate codec\n");
+		return AVERROR(EINVAL);
+	}
+
+	ret = avcodec_parameters_to_context(dec_ctx, fmt_ctx->streams[stream_idx]->codecpar);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to copy codec parameters to codec context\n");
+		return ret;
+	}
+
+	av_dump_format(fmt_ctx, 0, fname, 0);
+	if ((ret = avcodec_open2(dec_ctx, dec, NULL)) < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot open video decoder\n");
+		return ret;
+	}
+
+	frame = av_frame_alloc();
+	if (!frame) {
+		fprintf(stderr, "Could not allocate frame\n");
+		ret = AVERROR(ENOMEM);
+		//goto end;
+		return -1;
+	}
+	//av_bitstream_filter_filter(bsf, dec_ctx, NULL, &dummy, &dummy_len, NULL, 0, 0);
+	//dec_ctx->extradata,dec_ctx-->extradata_size
+	int cur_gop = -1;
+
+	while (av_read_frame(fmt_ctx, &pkt) >= 0 && cur_gop < gop_target) {
+
+		if (pkt.stream_index == stream_idx)
+		{
+			//ret = decode_packet(&pkt);
+			ret = avcodec_send_packet(dec_ctx, &pkt);
+			if (ret < 0) {
+				fprintf(stderr, "Error while sending a packet to the decoder\n");
+				return ret;
+			}
+			while (ret >= 0) {
+				ret = avcodec_receive_frame(dec_ctx, frame);
+				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+					ret = 0;
+					break;
+				}
+				else if (ret < 0) {
+					fprintf(stderr, "Error while receiving a frame from the decoder\n");
+					return ret;
+				}
+				if (frame->pict_type == AV_PICTURE_TYPE_I) {
+					++cur_gop;
+				}
+				if (cur_gop == gop_target) {
+					//write packet 
+					*npos = pkt.pos;
+					*plength = pkt.size;
+
+					break;
+				}
+
+
+				//bsfctx->par_out->extradata;
+				//bsfctx->par_out->extradata_size;
+
+				video_frame_count++;
+			}
+		}
+
+		if (cur_gop == gop_target)
+				break;
+	}
+
+	avcodec_free_context(&dec_ctx);
+	avformat_close_input(&fmt_ctx);
+	av_frame_free(&frame);
+	return 0;
+#endif
+
+#ifndef _TEST_MODULE
+	return 0;
+#endif
+
+}
+
+static int decodePacketbypos(const char* fname, int npos, int plength)
+{
+	int ret = 0;
+	AVPacket pkt = { 0 };
+	AVCodec *dec;
+	AVCodecContext *dec_ctx = NULL;
+	int stream_idx = 0;
+
+	if (avformat_open_input(&fmt_ctx, fname, NULL, NULL) < 0) {
+		fprintf(stderr, "Could not open source file %s\n", fname);
+		return -1;
+	}
+
+	if (avformat_find_stream_info(fmt_ctx, NULL) < 0) {
+		fprintf(stderr, "Could not find stream information\n");
+		return -1;
+	}
+
+	ret = av_find_best_stream(fmt_ctx, AVMEDIA_TYPE_VIDEO, -1, -1, &dec, 0);
+	if (ret < 0) {
+		fprintf(stderr, "Could not find %s stream in input file '%s'\n",
+			av_get_media_type_string(AVMEDIA_TYPE_VIDEO), src_filename);
+		return ret;
+	}
+
+	stream_idx = ret;
+
+	dec_ctx = avcodec_alloc_context3(dec);
+
+	if (!dec_ctx) {
+		fprintf(stderr, "failed to allocate codec\n");
+		return AVERROR(EINVAL);
+	}
+
+	ret = avcodec_parameters_to_context(dec_ctx, fmt_ctx->streams[stream_idx]->codecpar);
+	if (ret < 0) {
+		fprintf(stderr, "Failed to copy codec parameters to codec context\n");
+		return ret;
+	}
+
+	av_dump_format(fmt_ctx, 0, fname, 0);
+	if ((ret = avcodec_open2(dec_ctx, dec, NULL)) < 0) {
+		av_log(NULL, AV_LOG_ERROR, "Cannot open video decoder\n");
+		return ret;
+	}
+
+	frame = av_frame_alloc();
+	if (!frame) {
+		fprintf(stderr, "Could not allocate frame\n");
+		ret = AVERROR(ENOMEM);
+		//goto end;
+		return -1;
+	}
+	//decode once
+	while (av_read_frame(fmt_ctx, &pkt) >= 0) {
+
+		if (pkt.stream_index == stream_idx)
+		{
+			//ret = decode_packet(&pkt);
+			ret = avcodec_send_packet(dec_ctx, &pkt);
+			if (ret < 0) {
+				fprintf(stderr, "Error while sending a packet to the decoder\n");
+				return ret;
+			}
+			while (ret >= 0) {
+				ret = avcodec_receive_frame(dec_ctx, frame);
+				if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+					ret = 0;
+					break;
+				}
+			}
+
+			break;
+		}		
+	}
+
+	pkt.data = (uint8_t*)malloc(plength);
+	FILE *fvideo = fopen(fname, "rb");
+	if (fvideo) {
+		fseek(fvideo, npos, SEEK_SET);
+		fread(pkt.data, 1, plength, fvideo);
+		fclose(fvideo);
+	}
+	pkt.size = plength;
+
+	ret = avcodec_send_packet(dec_ctx, &pkt);
+	if (ret < 0) {
+		fprintf(stderr, "Error while sending a packet to the decoder\n");
+		return ret;
+	}
+	while (ret >= 0) {
+		ret = avcodec_receive_frame(dec_ctx, frame);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+			ret = 0;
+			break;
+		}
+		else if (ret < 0) {
+			fprintf(stderr, "Error while receiving a frame from the decoder\n");
+			return ret;
+		}
+		if (frame->pict_type == AV_PICTURE_TYPE_I) {
+			fprintf(stderr, "width = %d height = %d\n", frame->width, frame->height);
+		}
+	}
+
+	return 0;
+}
+
 #ifdef _TEST_MODULE	
 #if GPU_TEST_MODULE
 #else // cpu test mode 
@@ -1578,7 +1811,14 @@ int main(int argc, char **argv)
 		renditions = argv[2];
 	if (argc > 3)
 		featurelist = argv[3];
-#if 0
+
+#ifdef _AVPACKET_TEST
+	int navpos, avlenght;
+
+	getPacketposandlength(src_filename, 0, &navpos, &avlenght);
+	decodePacketbypos(src_filename, navpos, avlenght);
+
+#elif defined(_CALCPSNR_TEST)
 	float bitrate, qpi;
 
 	getdctbuffer(src_filename, NULL);
@@ -1605,9 +1845,7 @@ int main(int argc, char **argv)
 	}
 	loadft(src_filename, 0, 0, GOTFM, 480, 270);
 
-#endif	
-		
-
+#else
 	clock_t begin = clock();
 	int ntestcount = 50;
 
@@ -1618,6 +1856,7 @@ int main(int argc, char **argv)
 	clock_t end = clock();
 	double time_spent = (double)(end - begin) / ntestcount / CLOCKS_PER_SEC;
 	printf("utime = %lf\n\n", time_spent);
+#endif
 
 	return 0;
 }
