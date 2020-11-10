@@ -1555,7 +1555,7 @@ static PyObject *getdctbuffer(PyObject *self, PyObject *args)
 
 }
 
-static int getPacketposandlength(const char* fname, int gop_target, int* npos, int* plength)
+static int getPacketposandlength(const char* fname, int gop_target, int* npos, int* plength, int* nlastpos, int* plastlength)
 {
 #ifdef _TEST_MODULE
 	int ret = 0;
@@ -1625,7 +1625,7 @@ static int getPacketposandlength(const char* fname, int gop_target, int* npos, i
 	//dec_ctx->extradata,dec_ctx-->extradata_size
 	int cur_gop = -1;
 
-	while (av_read_frame(fmt_ctx, &pkt) >= 0 && cur_gop < gop_target) {
+	while (av_read_frame(fmt_ctx, &pkt) >= 0 /*&& cur_gop < gop_target*/) {
 
 		if (pkt.stream_index == stream_idx)
 		{
@@ -1652,10 +1652,14 @@ static int getPacketposandlength(const char* fname, int gop_target, int* npos, i
 					//write packet 
 					*npos = pkt.pos;
 					*plength = pkt.size;
-
-					break;
+					cur_gop++;
+					//break;
 				}
 
+				if (frame->pict_type == AV_PICTURE_TYPE_P || frame->pict_type == AV_PICTURE_TYPE_B) {
+					*nlastpos = pkt.pos;
+					*plastlength = pkt.size;
+				}
 
 				//bsfctx->par_out->extradata;
 				//bsfctx->par_out->extradata_size;
@@ -1664,8 +1668,8 @@ static int getPacketposandlength(const char* fname, int gop_target, int* npos, i
 			}
 		}
 
-		if (cur_gop == gop_target)
-				break;
+		//if (cur_gop == gop_target)
+		//		break;
 	}
 
 	avcodec_free_context(&dec_ctx);
@@ -1680,7 +1684,7 @@ static int getPacketposandlength(const char* fname, int gop_target, int* npos, i
 
 }
 
-static int decodePacketbypos(const char* fname, int npos, int plength)
+static int decodePacketbypos(const char* fname, int npos, int plength, int lastpos, int lastlength)
 {
 	int ret = 0;
 	AVPacket pkt = { 0 };
@@ -1761,7 +1765,7 @@ static int decodePacketbypos(const char* fname, int npos, int plength)
 	if (fvideo) {
 		fseek(fvideo, npos, SEEK_SET);
 		fread(pkt.data, 1, plength, fvideo);
-		fclose(fvideo);
+		//fclose(fvideo);
 	}
 	pkt.size = plength;
 
@@ -1781,6 +1785,37 @@ static int decodePacketbypos(const char* fname, int npos, int plength)
 			return ret;
 		}
 		if (frame->pict_type == AV_PICTURE_TYPE_I) {
+			fprintf(stderr, "width = %d height = %d\n", frame->width, frame->height);
+		}
+	}
+	// second packet 
+
+	pkt.data = (uint8_t*)malloc(lastlength);	
+	if (fvideo) {
+		fseek(fvideo, lastpos, SEEK_SET);
+		fread(pkt.data, 1, lastlength, fvideo);
+		fclose(fvideo);
+	}
+	pkt.size = lastlength;
+
+	ret = avcodec_send_packet(dec_ctx, &pkt);
+	if (ret < 0) {
+		fprintf(stderr, "Error while sending a packet to the decoder\n");
+		return ret;
+	}
+	while (ret >= 0) {
+		ret = avcodec_receive_frame(dec_ctx, frame);
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
+			ret = 0;
+			break;
+		}
+		else if (ret < 0) {
+			fprintf(stderr, "Error while receiving a frame from the decoder\n");
+			return ret;
+		}
+		if (frame->pict_type == AV_PICTURE_TYPE_I || frame->pict_type == AV_PICTURE_TYPE_B || 
+			frame->pict_type == AV_PICTURE_TYPE_P)
+		{
 			fprintf(stderr, "width = %d height = %d\n", frame->width, frame->height);
 		}
 	}
@@ -1813,10 +1848,10 @@ int main(int argc, char **argv)
 		featurelist = argv[3];
 
 #ifdef _AVPACKET_TEST
-	int navpos, avlenght;
+	int navpos, avlenght, avlastpos, avlastlenght;;
 
-	getPacketposandlength(src_filename, 0, &navpos, &avlenght);
-	decodePacketbypos(src_filename, navpos, avlenght);
+	getPacketposandlength(src_filename, 0, &navpos, &avlenght, &avlastpos, &avlastlenght);
+	decodePacketbypos(src_filename, navpos, avlenght, avlastpos, avlastlenght);
 
 #elif defined(_CALCPSNR_TEST)
 	float bitrate, qpi;
