@@ -426,7 +426,7 @@ static int encode(AVCodecContext *enc_ctx, AVPacket *pkt, AVFrame *frame, int *g
 	ret = avcodec_send_frame(enc_ctx, frame);
 	if (ret < 0) {
 		fprintf(stderr, "Error sending a frame for encoding\n");
-		exit(1);
+		return ret;
 	}
 
 	while (ret >= 0) {
@@ -435,7 +435,7 @@ static int encode(AVCodecContext *enc_ctx, AVPacket *pkt, AVFrame *frame, int *g
 			*got_packet_ptr = 1;
 			return ret;
 		}
-		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {			
+		if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF) {
 			return ret;
 		}			
 		else if (ret < 0) {
@@ -514,6 +514,7 @@ static int filter_encode_write_frame(AVFrame *frame, unsigned int stream_index)
         av_log(NULL, AV_LOG_INFO, "Pulling filtered frame from filters\n");
         ret = av_buffersink_get_frame(filter_ctx[stream_index].buffersink_ctx,
                 filt_frame);
+
         if (ret < 0) {
             /* if no more frames for output - returns AVERROR(EAGAIN)
              * if flushed and no more frames for output - returns AVERROR_EOF
@@ -554,8 +555,7 @@ static int flush_encoder(unsigned int stream_index)
     return ret;
 }
 
-static int compat_decode(AVCodecContext *avctx, AVFrame *frame,
-	int *got_frame, const AVPacket *pkt)
+static int compat_decode(AVCodecContext *avctx, AVFrame *frame,	int *got_frame, const AVPacket *pkt)
 {
 	int ret = 0;
 	*got_frame = 0;		
@@ -578,26 +578,26 @@ static int compat_decode(AVCodecContext *avctx, AVFrame *frame,
 			if (ret == AVERROR(EAGAIN) || ret == AVERROR_EOF)
 				ret = 0;
 			goto finish;
-		}	
+		}
+		*got_frame = 1;
+		break;
 	}
 
 finish:
 
 	return ret;
 }
-int decode_vframe(AVCodecContext *avctx, AVFrame *picture, int *got_picture_ptr, const AVPacket *avpkt)
-{
-	int ret;
 
-	ret = 0;
-	return ret;
-}
-int decode_aframe(AVCodecContext *avctx, AVFrame *picture, int *got_picture_ptr, const AVPacket *avpkt)
-{
-	int ret;
+int iscontain(int index, int count, int* indicies) {
+	int findidx = -1;
+	for (int i = 0; i < count; i++)	{
+		if (indicies[i] == index){
+			findidx = i;
+			break;
+		}
+	}
 
-	ret = 0;
-	return ret;
+	return findidx;
 }
 
 int main(int argc, char **argv)
@@ -608,8 +608,13 @@ int main(int argc, char **argv)
     enum AVMediaType type;
     unsigned int stream_index;
     unsigned int i;
-    int got_frame;
-    int (*dec_func)(AVCodecContext *, AVFrame *, int *, const AVPacket *);
+    int got_frame; 
+	int nframecount = -1;
+
+	int randindicies[10] = { 10, 15, 20, 30, 33, 60, 64, 70, };
+	int randcount = 8;
+	int packetpos[10] = { 0, };
+	int packetlen[10] = { 0, };
 
     if (argc != 3) {
         av_log(NULL, AV_LOG_ERROR, "Usage: %s <input file> <output file>\n", argv[0]);
@@ -642,25 +647,45 @@ int main(int argc, char **argv)
             av_packet_rescale_ts(&packet,
                                  ifmt_ctx->streams[stream_index]->time_base,
                                  stream_ctx[stream_index].dec_ctx->time_base);
+			
+			if (type == AVMEDIA_TYPE_VIDEO) { // video channel
+				ret = compat_decode(stream_ctx[stream_index].dec_ctx, frame, &got_frame, &packet);
+				if (ret < 0) {
+					av_frame_free(&frame);
+					av_log(NULL, AV_LOG_ERROR, "Decoding failed\n");
+					break;
+				}
 
-			dec_func = (type == AVMEDIA_TYPE_VIDEO) ? decode_vframe : decode_aframe;            
+				if (got_frame) {
+					nframecount++;
+					frame->pts = frame->best_effort_timestamp;
+					ret = filter_encode_write_frame(frame, stream_index);
+					av_frame_free(&frame);
+					if (ret < 0)
+						goto end;
+					//get seek point & len
+					if (iscontain(nframecount, randcount, randindicies) > -1){
 
-            ret = dec_func(stream_ctx[stream_index].dec_ctx, frame, &got_frame, &packet);
-            if (ret < 0) {
-                av_frame_free(&frame);
-                av_log(NULL, AV_LOG_ERROR, "Decoding failed\n");
-                break;
-            }
+					}
 
-            if (got_frame) {
-                frame->pts = frame->best_effort_timestamp;
-                ret = filter_encode_write_frame(frame, stream_index);
-                av_frame_free(&frame);
-                if (ret < 0)
-                    goto end;
-            } else {
-                av_frame_free(&frame);
-            }
+				}
+				else {
+					av_frame_free(&frame);
+				}
+			}
+			else if (type == AVMEDIA_TYPE_AUDIO) { // audio channel
+				AVPacket *pkt = NULL;
+				pkt = av_packet_clone(&packet);
+				if (pkt) {
+					av_interleaved_write_frame(ifmt_ctx, pkt);
+					av_packet_free(&pkt);
+				}
+				else {
+					if (!pkt) av_log(NULL, AV_LOG_ERROR, "transcoder: Error allocating packet\n");
+				}
+			}
+            
+
         } else {
             /* remux this frame without reencoding */
             av_packet_rescale_ts(&packet,
@@ -686,11 +711,13 @@ int main(int argc, char **argv)
         }
 
         /* flush encoder */
+		/*
         ret = flush_encoder(i);
         if (ret < 0) {
             av_log(NULL, AV_LOG_ERROR, "Flushing encoder failed\n");
             goto end;
         }
+		*/
     }
 
     av_write_trailer(ofmt_ctx);
@@ -714,6 +741,13 @@ end:
     if (ret < 0)
 		av_log(NULL, AV_LOG_ERROR, "Error occurred: \n");
         //av_log(NULL, AV_LOG_ERROR, "Error occurred: %s\n", av_err2str(ret));
+
+	//print packet pos & len
+	for (int i = 0; i < randcount; i++)
+	{
+		av_log(NULL, AV_LOG_ERROR, "no: %02d, fnum: %d, pos: %d, len: %d \n",
+			i, randindicies[i], packetpos[i], packetlen[i]);
+	}
 
     return ret ? 1 : 0;
 }
