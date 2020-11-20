@@ -124,7 +124,7 @@
     </ClCompile>
     <Link>
       <SubSystem>Console</SubSystem>
-      <AdditionalLibraryDirectories>./ffmpeg-4.2.1/lib;./opencv2.4.13/x64/vc14/lib</AdditionalLibraryDirectories>
+      <AdditionalLibraryDirectories>./ffmpeg-4.3.1/lib;./opencv2.4.13/x64/vc14/lib</AdditionalLibraryDirectories>
       <AdditionalDependencies>avcodec.lib;avutil.lib;avformat.lib;swscale.lib;avdevice.lib;swresample.lib;avfilter.lib;opencv_core2413d.lib;opencv_gpu2413d.lib;opencv_imgproc2413d.lib;opencv_highgui2413d.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>

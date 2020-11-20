@@ -615,6 +615,8 @@ int main(int argc, char **argv)
 	int randcount = 8;
 	int packetpos[10] = { 0, };
 	int packetlen[10] = { 0, };
+	int64_t prebuffpos, curbuffpos;
+	
 
     if (argc != 3) {
         av_log(NULL, AV_LOG_ERROR, "Usage: %s <input file> <output file>\n", argv[0]);
@@ -659,13 +661,21 @@ int main(int argc, char **argv)
 				if (got_frame) {
 					nframecount++;
 					frame->pts = frame->best_effort_timestamp;
+					//store pre buffer pos
+					if (iscontain(nframecount, randcount, randindicies) > -1) {
+						prebuffpos = ofmt_ctx->pb->pos + (ofmt_ctx->pb->buf_ptr - ofmt_ctx->pb->buffer);
+					}
 					ret = filter_encode_write_frame(frame, stream_index);
 					av_frame_free(&frame);
 					if (ret < 0)
 						goto end;
 					//get seek point & len
-					if (iscontain(nframecount, randcount, randindicies) > -1){
+					int index = iscontain(nframecount, randcount, randindicies);
+					if (index > -1){
+						curbuffpos = ofmt_ctx->pb->pos + (ofmt_ctx->pb->buf_ptr - ofmt_ctx->pb->buffer);
 
+						packetpos[index] = prebuffpos;
+						packetlen[index] = (curbuffpos - prebuffpos);
 					}
 
 				}
@@ -684,7 +694,6 @@ int main(int argc, char **argv)
 					if (!pkt) av_log(NULL, AV_LOG_ERROR, "transcoder: Error allocating packet\n");
 				}
 			}
-            
 
         } else {
             /* remux this frame without reencoding */
