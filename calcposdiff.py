@@ -1,6 +1,20 @@
 import csv
 import argparse
 import numpy
+from scipy.spatial import distance
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+
+def getfieldcount(fname):
+    with open(fname) as csv_file:
+        lval = 0
+        csv_reader = csv.reader(csv_file, delimiter=',')
+        flag = True
+        for row in csv_reader:
+            lval = len(row)
+            break
+    return lval
 
 def getvallist(fname):
     with open(fname) as csv_file:
@@ -8,7 +22,6 @@ def getvallist(fname):
         csv_reader = csv.reader(csv_file, delimiter=',')
         flag = True
         for row in csv_reader:
-            print(row)
             if flag == True:
                 flag = False
                 continue
@@ -34,16 +47,43 @@ if __name__ == "__main__":
     incsv2 = args.inf2
 
     #check path
+    fieldnum = getfieldcount(incsv1)
     listvall = getvallist(incsv1)
     listval2 = getvallist(incsv2)
 
-    listpos1 = numpy.array(covertdigitlist(listvall,1))
-    listlen1 = numpy.array(covertdigitlist(listvall,2))
-    listpos2 = numpy.array(covertdigitlist(listval2,1))
-    listlen2 = numpy.array(covertdigitlist(listval2,2))
+    assert(len(listvall) == len(listval2))
+
+    posidx = fieldnum - 2
+
+
+    listpos1 = numpy.array(covertdigitlist(listvall,posidx))
+    listlen1 = numpy.array(covertdigitlist(listvall,posidx+1))
+    listpos2 = numpy.array(covertdigitlist(listval2,posidx))
+    listlen2 = numpy.array(covertdigitlist(listval2,posidx+1))
 
     diffpos = listpos1 - listpos2
     difflen = listlen1 - listlen2
+
+    #calc cosine distance
+    cosinedist = []
+    for i in range(0, len(listpos1)):
+        cosinedist.append(distance.cosine(listpos1[i],listpos2[i]))
+
+    npdist = numpy.array(cosinedist)
+    npdist = npdist
+    #ax = sns.distplot(npdist)
+
+    # seaborn histogram ?histplot
+    sns.distplot(npdist, hist=True, kde=False,
+                 bins=int(100 / 2), color='blue',
+                 hist_kws={'edgecolor': 'black'})
+
+    # Add labels
+    plt.title('Acceptable Distance')
+    plt.xlabel('cosine distance')
+    plt.ylabel('count')
+    #plt.tight_layout()
+    plt.show()
 
     maxposlist = numpy.max(diffpos)
     minposlist = numpy.min(diffpos)
