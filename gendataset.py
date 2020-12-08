@@ -21,7 +21,7 @@ if __name__ == "__main__":
     vprofilenum = len(vprofiles)
     devmodes = ["nv","sw"]
 
-    fileset = [file for file in glob.glob(testdir + "**/*", recursive=True)]
+    fileset = [file for file in glob.glob(testdir + "/**/*.*", recursive=True)]
     count = len(fileset) - 1
     binit = False
 
@@ -48,6 +48,9 @@ if __name__ == "__main__":
             #generate randomize 10 indices
 
             indexes = np.sort(np.random.choice(frame_count, max_samples, False))
+            #exclude 0
+            if indexes[0] == 0:
+                indexes[0] = 1
             strindices = '"' + str(indexes[0])
             for i in range(1, max_samples):
                 strindices += ("," + str(indexes[i]))
@@ -62,5 +65,8 @@ if __name__ == "__main__":
             #if cap is not None:
             #    cap.release()
 
-    print('Success!')
     fileout.close()
+    print('Success!')
+
+
+

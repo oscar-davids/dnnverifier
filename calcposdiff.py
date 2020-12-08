@@ -70,12 +70,14 @@ if __name__ == "__main__":
         cosinedist.append(distance.cosine(listpos1[i],listpos2[i]))
 
     npdist = numpy.array(cosinedist)
-    npdist = npdist
+    bnpdist = npdist < 0.0012
+    count = numpy.count_nonzero(bnpdist)
+
     #ax = sns.distplot(npdist)
 
     # seaborn histogram ?histplot
     sns.distplot(npdist, hist=True, kde=False,
-                 bins=int(100 / 2), color='blue',
+                 bins=int(1000), color='blue',
                  hist_kws={'edgecolor': 'black'})
 
     # Add labels
@@ -84,6 +86,9 @@ if __name__ == "__main__":
     plt.ylabel('count')
     #plt.tight_layout()
     plt.show()
+
+    print(numpy.min(npdist))
+    print(numpy.max(npdist))
 
     maxposlist = numpy.max(diffpos)
     minposlist = numpy.min(diffpos)
