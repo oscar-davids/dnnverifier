@@ -59,4 +59,4 @@ if __name__ == "__main__":
                 wr.writerow(wrow)
 
     fileout.close()
-    print('Success generate random positions!')
+    print('Success generate random positions and length for negative test!')

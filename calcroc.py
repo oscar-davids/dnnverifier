@@ -53,11 +53,12 @@ def main():
             for row in reader:
                 #print(row['psnr'], row['target'])
                 scores.append( float(row[feature]))
-                lables.append(int(row['target']))
+                lables.append( 1- int(row['target']))
 
     smax = float(max(scores))
 
-    ascores = np.array(scores) / smax
+    #ascores = np.array(scores) / smax
+    ascores = np.array(scores)
     alable = np.array(lables)
 
 
@@ -68,12 +69,15 @@ def main():
     pp.title("Receiver Operating Characteristic")
     pp.xlabel("False Positive Rate(1 - Specificity)")
     pp.ylabel("True Positive Rate(Sensitivity)")
+    pp.xscale("log")
     pp.plot(afpr, atpr, "b", label="(AUC = %0.2f)" % arocauc)
-    pp.plot([0, 1], [1, 1], "y--")
-    pp.plot([0, 1], [0, 1], "r--")
+    pp.xlim([0.0, 0.001])
+    #pp.plot([0, 0.1], [0, 1], "y--")
+    #pp.plot([0, 1], [0, 1], "r--")
     pp.legend(loc="lower right")
     pp.show()
 
+    '''
     pp.figure()
     pp.plot(1.0 - atpr, thresholds, marker='*', label='tpr')
     pp.plot(afpr, thresholds, marker='o', label='fpr')
@@ -84,21 +88,25 @@ def main():
     pp.ylabel('far/fpr')
     pp.title(' thresh - far/fpr')
     pp.show()
+    '''
 
-    for threval in np.arange(0.01, 1.0, 0.01):
+    for threval in np.arange(0.0001, 0.1, 0.0001):
         predictval = (ascores > threval)
 
         TP, FP, TN, FN = perf_measure(alable, predictval)
+        FACC = (TP + TN) / float(len(alable))
+        TPR = TP / float(TP + FN)
+        FPR = FP / float(FP + TN)
+        print("Threshold: %.5f Accuracy :%.5f  TPR:%.5f FPR:%.5f" % (threval, FACC, TPR, FPR))
 
-        #FACC = accuracy_score(alable, predictval)
-        FACC = (TP + FP) / float(len(alable))
-        FFAR = FP / float(FP + TN)
-        FFRR = FN / float(TP + FN)
-
+        '''
+        FACC = accuracy_score(alable, predictval)
+        FFAR = precision_score(alable, predictval)
+        FTPR = recall_score(alable, predictval)
         #ftar =  precision_score(alable, predictval)
         #ffar = recall_score(alable, predictval)
-
-        print("Threshold: %.2f Accuracy : %.2f  FAR: %.2f FRR: %.2f" %(threval * smax ,FACC, FFAR,FFRR))
+        #print("Threshold: %.5f Accuracy : %.5f  FAR: %.5f FRR: %.5f" %(threval ,FACC, FFAR,FFRR))
+        '''
 
     print("task complete!")
 
