@@ -25,7 +25,7 @@ if __name__ == "__main__":
     count = len(fileset) - 1
     binit = False
 
-    outcsv = "testlist" + datetime.datetime.now().strftime("%Y%m%d%H%M%S") + ".csv"
+    outcsv = "testlist" + datetime.datetime.now().strftime("d%H%M") + ".csv"
     fileout = open(outcsv, 'w', newline='')
     wr = csv.writer(fileout)
     wr.writerow(['filepath', 'width', 'height', 'fps', 'bitrate', 'profile', 'devmode', 'framecount', 'indices'])

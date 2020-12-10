@@ -77,7 +77,7 @@ def main():
     pp.legend(loc="lower right")
     pp.show()
 
-    '''
+
     pp.figure()
     pp.plot(1.0 - atpr, thresholds, marker='*', label='tpr')
     pp.plot(afpr, thresholds, marker='o', label='fpr')
@@ -88,7 +88,7 @@ def main():
     pp.ylabel('far/fpr')
     pp.title(' thresh - far/fpr')
     pp.show()
-    '''
+
 
     for threval in np.arange(0.0001, 0.1, 0.0001):
         predictval = (ascores > threval)
