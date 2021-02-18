@@ -164,3 +164,30 @@ if __name__ == "__main__":
     fileout.close()
     print('Success calculation diff features!')
 '''
+'''
+
+import argparse
+import csv
+from sklearn.metrics import fbeta_score, classification_report, confusion_matrix
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--infile", default="accuracy0211034802.csv", help="csv file to calculate confusion matrix.")
+    args = parser.parse_args()
+    infile = args.infile
+
+    label = []
+    ypred = []
+
+    with open(infile, newline='') as csvfile:
+        reader = csv.DictReader(csvfile)
+        for row in reader:
+            #label.append(0)
+            label.append(int(row['target']))
+            ypred.append(int(row['infertarget']))
+
+    print(f'classification report:')
+    print(classification_report(label, ypred))
+    print(f'confusion matrix:')
+    print(confusion_matrix(label, ypred))
+'''
